@@ -51,22 +51,20 @@ NUM_COLS = len(HEADERS)  # 16
 
 class SheetsClient:
     def __init__(self):
-        import json
-from google.oauth2.service_account import Credentials
-
-creds_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
-if creds_json:
-    creds_info = json.loads(creds_json)
-    creds = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
-else:
-    creds = Credentials.from_service_account_file(
-        os.environ.get("GOOGLE_CREDENTIALS_FILE", "credentials.json"),
-        scopes=SCOPES,
-    )
-        self._service = build("sheets", "v4", credentials=creds, cache_discovery=False)
-        self._spreadsheet_id = os.environ["SPREADSHEET_ID"]
-        self._sheet_name = os.environ.get("SHEET_NAME", "Sheet1")
-        self._range_prefix = f"{self._sheet_name}!"
+    import json
+    creds_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
+    if creds_json:
+        creds_info = json.loads(creds_json)
+        creds = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
+    else:
+        creds = Credentials.from_service_account_file(
+            os.environ.get("GOOGLE_CREDENTIALS_FILE", "credentials.json"),
+            scopes=SCOPES,
+        )
+    self._service = build("sheets", "v4", credentials=creds, cache_discovery=False)
+    self._spreadsheet_id = os.environ["SPREADSHEET_ID"]
+    self._sheet_name = os.environ.get("SHEET_NAME", "Sheet1")
+    self._range_prefix = f"{self._sheet_name}!"
 
     # ─── Low-level helpers ───────────────────────────────────────────────────
 
