@@ -1,0 +1,10 @@
+slack-bolt==1.20.1
+slack-sdk==3.31.0
+google-auth==2.34.0
+google-auth-httplib2==0.2.0
+google-api-python-client==2.143.0
+anthropic==0.34.2
+beautifulsoup4==4.12.3
+requests==2.32.3
+python-dotenv==1.0.1
+lxml==5.3.0

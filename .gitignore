@@ -1,0 +1,7 @@
+.env
+credentials.json
+kol_cache.db
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
