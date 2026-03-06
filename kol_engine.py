@@ -1,19 +1,8 @@
 """
 kol_engine.py — Orchestrates scan_all and find_kol operations.
-
-scan_all:
-  1. Batch-read all hyperlinks from the Name column
-  2. Skip rows that are already cached (unless force=True)
-  3. Scrape each new link → enrich with AI → write back to sheet & DB
-  4. Update "Last Scanned" and "Link Status" columns
-
-find_kol:
-  1. Parse the query with AI
-  2. Search the local DB cache
-  3. Scrape + cache any Name-column rows that haven't been scanned yet
-  4. Return matching results
 """
 
+import time
 import logging
 from datetime import datetime, timezone
 from typing import Callable, Optional
@@ -21,11 +10,10 @@ from typing import Callable, Optional
 import database as db
 import scraper as sc
 import ai_analyzer as ai
-from sheets import SheetsClient
+from sheets import SheetsClient, COL, NUM_COLS
 
 logger = logging.getLogger(__name__)
 
-# Rows to process per progress update
 PROGRESS_BATCH = 5
 
 
@@ -35,46 +23,31 @@ class KOLEngine:
         self._sheets = SheetsClient()
         self._sheets.ensure_headers()
 
-    # ─── Scan All ────────────────────────────────────────────────────────────
-
     def scan_all(self, progress_callback: Optional[Callable] = None) -> dict:
-        """
-        Full scan: scrape every row that has a link in the Name column.
-        Overwrites cache for all rows (this is the refresh operation).
-        Returns summary dict.
-        """
         stats = {"scanned": 0, "updated": 0, "cached": 0, "errors": 0}
-
-        rows        = self._sheets.get_all_rows()
-        all_links   = self._sheets.get_all_hyperlinks()
-        total       = len(rows)
-
+        rows      = self._sheets.get_all_rows()
+        all_links = self._sheets.get_all_hyperlinks()
+        total     = len(rows)
         if not rows:
             return stats
 
         for i, row in enumerate(rows, start=1):
             row_num = row["_row"]
             url     = all_links.get(row_num)
-
             if not url:
-                # No link — mark status
-                self._sheets.update_row_fields(row_num, {"link_status": "No Link"})
+                self._rate_limited_write(row_num, row, {"link_status": "No Link"})
                 continue
-
             try:
                 profile  = sc.scrape_profile(url)
                 enriched = {}
-
                 if profile.get("link_status") == "OK":
-                    bio      = profile.get("raw_bio", "")
                     enriched = ai.analyze_profile(
-                        platform  = profile.get("platform", ""),
-                        followers = profile.get("followers", ""),
-                        bio       = bio,
-                        location  = profile.get("location") or row.get("location", ""),
-                        handle    = profile.get("handle", ""),
+                        platform=profile.get("platform", ""),
+                        followers=profile.get("followers", ""),
+                        bio=profile.get("raw_bio", ""),
+                        location=profile.get("location") or row.get("location", ""),
+                        handle=profile.get("handle", ""),
                     )
-
                 now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
                 fields = {
                     "handle":       profile.get("handle", "") or row.get("handle", ""),
@@ -90,30 +63,17 @@ class KOLEngine:
                     "last_scanned": now,
                     "link_status":  profile.get("link_status", "OK"),
                 }
-
-                # Write to sheet
-                self._sheets.update_row_fields(row_num, fields)
-
-                # Write to cache
-                db.upsert(row_num, {
-                    **fields,
-                    "name":        row.get("name", ""),
-                    "tags":        row.get("tags", ""),
-                    "contact":     row.get("contact", ""),
-                    "notes":       row.get("notes", ""),
-                    "profile_url": url,
-                    "raw_bio":     profile.get("raw_bio", ""),
-                })
-
+                self._rate_limited_write(row_num, row, fields)
+                db.upsert(row_num, {**fields, "name": row.get("name",""), "tags": row.get("tags",""),
+                    "contact": row.get("contact",""), "notes": row.get("notes",""),
+                    "profile_url": url, "raw_bio": profile.get("raw_bio","")})
                 stats["scanned"] += 1
                 stats["updated"] += 1
-
             except Exception as e:
                 logger.error(f"Error processing row {row_num}: {e}")
-                self._sheets.update_row_fields(row_num, {"link_status": "Error"})
+                self._rate_limited_write(row_num, row, {"link_status": "Error"})
                 stats["errors"] += 1
 
-            # Progress update every N rows
             if progress_callback and i % PROGRESS_BATCH == 0:
                 pct = int(i / total * 100)
                 progress_callback(f"⏳ Scanning… {i}/{total} ({pct}%) — last: {row.get('name', row_num)}")
@@ -121,31 +81,15 @@ class KOLEngine:
         db.set_meta("last_scan", datetime.now(timezone.utc).isoformat())
         return stats
 
-    # ─── Find KOL ────────────────────────────────────────────────────────────
-
-    def find_kol(self, query: str) -> list[dict]:
-        """
-        1. Parse query → filters
-        2. Scan any rows that haven't been cached yet
-        3. Search cache → return matches
-        """
-        # 1. Parse query
+    def find_kol(self, query: str) -> list:
         filters = ai.parse_find_query(query)
-
-        # 2. Scan uncached rows first (cost-efficient: only new ones)
         self._scan_uncached_rows()
-
-        # 3. Search cache
-        results = db.search_kols(
-            niche    = filters.get("niche"),
-            platform = filters.get("platform"),
-            language = filters.get("language"),
-            location = filters.get("location"),
+        return db.search_kols(
+            niche=filters.get("niche"),
+            platform=filters.get("platform"),
+            language=filters.get("language"),
+            location=filters.get("location"),
         )
-
-        return results
-
-    # ─── Status ──────────────────────────────────────────────────────────────
 
     def get_status(self) -> dict:
         total_rows  = self._sheets.get_row_count()
@@ -157,36 +101,32 @@ class KOLEngine:
             "last_scan":  db.get_meta("last_scan"),
         }
 
-    # ─── Internal helpers ────────────────────────────────────────────────────
-
     def _scan_uncached_rows(self) -> None:
-        """Scan only rows that are not yet in the cache (light pass for /findkol)."""
-        all_links    = self._sheets.get_all_hyperlinks()
-        cached_nums  = db.get_cached_row_nums()
-        rows         = self._sheets.get_all_rows()
+        """Only 2 batch API reads total — no per-row reads."""
+        cached_nums = db.get_cached_row_nums()
+        rows        = self._sheets.get_all_rows()        # 1 API call
+        all_links   = self._sheets.get_all_hyperlinks()  # 1 API call
 
-        for row in rows:
+        uncached = [r for r in rows if r["_row"] not in cached_nums]
+        if not uncached:
+            return
+
+        for row in uncached:
             row_num = row["_row"]
-            if row_num in cached_nums:
-                continue  # Already cached — skip
-
-            url = all_links.get(row_num)
+            url     = all_links.get(row_num)
             if not url:
                 continue
-
             try:
                 profile  = sc.scrape_profile(url)
                 enriched = {}
-
                 if profile.get("link_status") == "OK":
                     enriched = ai.analyze_profile(
-                        platform  = profile.get("platform", ""),
-                        followers = profile.get("followers", ""),
-                        bio       = profile.get("raw_bio", ""),
-                        location  = profile.get("location") or row.get("location", ""),
-                        handle    = profile.get("handle", ""),
+                        platform=profile.get("platform", ""),
+                        followers=profile.get("followers", ""),
+                        bio=profile.get("raw_bio", ""),
+                        location=profile.get("location") or row.get("location", ""),
+                        handle=profile.get("handle", ""),
                     )
-
                 now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
                 fields = {
                     "handle":       profile.get("handle", ""),
@@ -202,21 +142,29 @@ class KOLEngine:
                     "last_scanned": now,
                     "link_status":  profile.get("link_status", "OK"),
                 }
-
-                # Only write sheet columns that are empty
-                update_fields = {k: v for k, v in fields.items() if not row.get(k)}
+                db.upsert(row_num, {**fields, "name": row.get("name",""), "tags": row.get("tags",""),
+                    "contact": row.get("contact",""), "notes": row.get("notes",""),
+                    "profile_url": url, "raw_bio": profile.get("raw_bio","")})
+                update_fields = {k: v for k, v in fields.items() if not row.get(k) and v}
                 if update_fields:
-                    self._sheets.update_row_fields(row_num, update_fields)
-
-                db.upsert(row_num, {
-                    **fields,
-                    "name":        row.get("name", ""),
-                    "tags":        row.get("tags", ""),
-                    "contact":     row.get("contact", ""),
-                    "notes":       row.get("notes", ""),
-                    "profile_url": url,
-                    "raw_bio":     profile.get("raw_bio", ""),
-                })
-
+                    self._rate_limited_write(row_num, row, update_fields)
             except Exception as e:
                 logger.warning(f"[find_kol] Could not scan row {row_num}: {e}")
+
+    def _rate_limited_write(self, row_num: int, current_row: dict, fields: dict) -> None:
+        """Write to sheet using already-fetched row data. No extra API read."""
+        try:
+            padded = [""] * NUM_COLS
+            for k, idx in COL.items():
+                padded[idx] = current_row.get(k, "")
+            for field, value in fields.items():
+                if field in COL:
+                    padded[COL[field]] = value if value is not None else ""
+            col_end = chr(ord("A") + NUM_COLS - 1)
+            self._sheets._update(
+                f"{self._sheets._range_prefix}A{row_num}:{col_end}{row_num}",
+                [padded],
+            )
+            time.sleep(1.1)  # ~55 writes/min — safely under 60/min quota
+        except Exception as e:
+            logger.warning(f"Sheet write failed for row {row_num}: {e}")
