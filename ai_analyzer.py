@@ -53,7 +53,7 @@ Based on the posts above, return JSON with:
 
 - location: string — location if mentioned or inferred (or empty string if unknown)
 
-Return ONLY valid JSON like: {{"niche": "Crypto", "language": "English", "location": "Philippines"}}""""""
+Return ONLY valid JSON like: {{"niche": "Crypto", "language": "English", "location": "Philippines"}}"""
 
 
 def analyze_profile(
