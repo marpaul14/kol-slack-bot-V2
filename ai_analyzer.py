@@ -1,52 +1,59 @@
 """
-ai_analyzer.py — Uses Anthropic Claude to enrich KOL profiles.
+ai_analyzer.py — Uses Claude Haiku (cheapest model) to analyze KOL posts.
 
-Given raw scraped data (bio, followers, platform, location),
-Claude infers: niche, language, and estimated rates.
+Process:
+1. Apify scrapes 10 recent posts
+2. Claude Haiku analyzes posts to determine niche & language
+
+Cost: ~$0.25 per 1M tokens (very cheap!)
+
+This runs ONCE during /scanall and results are cached.
+/findkol only queries the database - no AI calls needed.
 """
 
 import os
 import json
 import logging
 import re
-from anthropic import Anthropic
 
 logger = logging.getLogger(__name__)
-client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+
+# Initialize Anthropic client
+_client = None
+try:
+    from anthropic import Anthropic
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        _client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+except ImportError:
+    logger.warning("[AI] anthropic package not installed")
+
 
 SYSTEM_PROMPT = """You are an expert KOL (Key Opinion Leader) analyst.
-Given a social media profile's raw data, extract and infer structured information.
+Analyze the social media posts and profile to determine the KOL's content niche and language.
 Always respond with valid JSON only — no markdown, no explanation."""
 
-ANALYSIS_PROMPT = """Analyze this KOL profile and return a JSON object with these exact keys:
-- niche: string — primary content niche (e.g., "Crypto", "Gaming", "Beauty", "Finance", "Tech")
-- language: string — primary language of content (e.g., "English", "Filipino", "Tagalog", "Chinese")
-- location: string — inferred location if not already provided (city/country)
-- qt_rate: string — estimated quote-tweet rate (e.g., "$50", "$100-200", "N/A" if not X)
-- tweet_rate: string — estimated tweet/post rate
-- longform_rate: string — estimated long-form thread/article rate
-- article_rate: string — estimated article/blog post rate
-- video_rate: string — estimated video rate (for TikTok/YT/Instagram, else "N/A")
-- confidence: string — "high", "medium", or "low"
+ANALYSIS_PROMPT = """Analyze this KOL's recent posts and determine their niche.
 
-Base your rate estimates on:
-- Platform and follower count tiers:
-  • Nano (<10K): $10-50 per post
-  • Micro (10K-100K): $50-500 per post
-  • Mid (100K-500K): $500-2000 per post
-  • Macro (500K-1M): $2000-5000 per post
-  • Mega (1M+): $5000+ per post
-- Niche premium: Crypto/Finance/Tech command 2-3x vs lifestyle niches
-- Region: PH/SEA rates are typically 30-60% lower than US/EU rates
+PROFILE:
+- Handle: {handle}
+- Followers: {followers}
+- Bio: {bio}
+- Location: {location}
 
-Profile data:
-Platform: {platform}
-Followers: {followers}
-Bio: {bio}
-Location: {location}
-Handle: {handle}
+RECENT POSTS (10 posts - analyze these to determine content niche):
+{posts}
 
-Return ONLY the JSON object."""
+Based on the posts above, return JSON with:
+- niche: string — the PRIMARY content topic. Choose ONE from:
+  Crypto, DeFi, NFT, Web3, Bitcoin, Trading, Gaming, Tech, AI, 
+  Beauty, Fashion, Fitness, Travel, Food, Finance, Investing,
+  Music, Comedy, Education, News, Lifestyle, Entertainment, Sports, Other
+
+- language: string — primary language of the posts (English, Filipino, Spanish, etc.)
+
+- location: string — location if mentioned or inferred (or empty string if unknown)
+
+Return ONLY valid JSON like: {{"niche": "Crypto", "language": "English", "location": "Philippines"}}""""""
 
 
 def analyze_profile(
@@ -55,79 +62,205 @@ def analyze_profile(
     bio: str,
     location: str = "",
     handle: str = "",
+    recent_posts: list = None,
 ) -> dict:
     """
-    Call Claude to enrich a profile with niche, language, and rate estimates.
-    Returns a dict with the enriched fields.
+    Analyze KOL profile and recent posts to determine niche.
+    
+    Args:
+        platform: X, TikTok, YouTube, Instagram
+        followers: Follower count string
+        bio: Profile bio text
+        location: Known location
+        handle: @handle
+        recent_posts: List of up to 5 recent post texts
+    
+    Returns:
+        Dict with niche, language, location
     """
+    posts = recent_posts or []
+    
+    # If no AI client, use fallback
+    if not _client:
+        logger.warning("[AI] No API key, using keyword-based analysis")
+        return _fallback_analysis(handle, bio, posts)
+    
+    # Format posts for prompt
+    if posts:
+        posts_text = "\n".join(f"{i+1}. {p[:300]}" for i, p in enumerate(posts[:10]))
+    else:
+        posts_text = "(No posts available - analyze handle and bio only)"
+    
     prompt = ANALYSIS_PROMPT.format(
-        platform=platform or "Unknown",
-        followers=followers or "Unknown",
-        bio=bio or "No bio available",
-        location=location or "Unknown",
         handle=handle or "Unknown",
+        followers=followers or "Unknown",
+        bio=bio[:500] if bio else "(No bio)",
+        location=location or "Unknown",
+        posts=posts_text,
     )
 
+    logger.info(f"[AI] Analyzing @{handle} with {len(posts)} posts")
+
     try:
-        response = client.messages.create(
-            model="claude-haiku-4-5-20251001",  # Cheapest, fast enough for enrichment
-            max_tokens=512,
+        response = _client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=256,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}],
         )
         raw = response.content[0].text.strip()
 
-        # Strip any accidental markdown fences
+        # Strip markdown fences
         raw = re.sub(r"^```(?:json)?\s*", "", raw)
         raw = re.sub(r"\s*```$", "", raw)
 
         data = json.loads(raw)
-        return {
-            "niche":      data.get("niche", ""),
-            "language":   data.get("language", ""),
-            "location":   data.get("location", ""),
-            "qt":         data.get("qt_rate", ""),
-            "tweet":      data.get("tweet_rate", ""),
-            "longform":   data.get("longform_rate", ""),
-            "article":    data.get("article_rate", ""),
-            "video_rate": data.get("video_rate", ""),
-            "ai_confidence": data.get("confidence", "low"),
+        
+        result = {
+            "niche": data.get("niche", ""),
+            "language": data.get("language", "English"),
+            "location": data.get("location", "") or location,
         }
+        
+        logger.info(f"[AI] Result: niche={result['niche']}, language={result['language']}")
+        return result
+        
     except json.JSONDecodeError as e:
-        logger.warning(f"AI returned invalid JSON: {e} | raw={raw!r}")
-        return {}
+        logger.warning(f"[AI] Invalid JSON response: {e}")
+        return _fallback_analysis(handle, bio, posts)
     except Exception as e:
-        logger.error(f"AI analysis failed: {e}")
-        return {}
+        logger.error(f"[AI] Analysis failed: {e}")
+        return _fallback_analysis(handle, bio, posts)
+
+
+def _fallback_analysis(handle: str, bio: str, posts: list) -> dict:
+    """
+    Rule-based fallback when AI is unavailable.
+    Uses keyword matching on handle, bio, and posts.
+    """
+    handle_lower = (handle or "").lower()
+    bio_lower = (bio or "").lower()
+    posts_text = " ".join(posts).lower() if posts else ""
+    combined = f"{handle_lower} {bio_lower} {posts_text}"
+    
+    # Keyword-based niche detection (ordered by priority)
+    niche = "Other"
+    
+    # Crypto-related
+    crypto_keywords = [
+        "crypto", "defi", "web3", "nft", "eth", "btc", "bitcoin", "ethereum",
+        "solana", "altcoin", "trading", "hodl", "airdrop", "degen", "gm", 
+        "wagmi", "blockchain", "token", "chain", "wallet", "mint"
+    ]
+    if any(kw in combined for kw in crypto_keywords):
+        # More specific crypto niches
+        if any(kw in combined for kw in ["defi", "yield", "swap", "liquidity"]):
+            niche = "DeFi"
+        elif any(kw in combined for kw in ["nft", "mint", "collection", "pfp"]):
+            niche = "NFT"
+        elif any(kw in combined for kw in ["web3", "dapp"]):
+            niche = "Web3"
+        elif any(kw in combined for kw in ["trading", "chart", "ta ", "technical"]):
+            niche = "Trading"
+        else:
+            niche = "Crypto"
+    
+    # Other niches
+    elif any(kw in combined for kw in ["game", "gaming", "esport", "stream", "twitch", "gamer"]):
+        niche = "Gaming"
+    elif any(kw in combined for kw in ["tech", "dev", "code", "programming", "software", "startup"]):
+        niche = "Tech"
+    elif any(kw in combined for kw in [" ai ", "artificial", "machine learning", "llm", "chatgpt"]):
+        niche = "AI"
+    elif any(kw in combined for kw in ["beauty", "makeup", "skincare", "cosmetic"]):
+        niche = "Beauty"
+    elif any(kw in combined for kw in ["fashion", "style", "outfit", "ootd"]):
+        niche = "Fashion"
+    elif any(kw in combined for kw in ["fitness", "gym", "workout", "health", "muscle"]):
+        niche = "Fitness"
+    elif any(kw in combined for kw in ["travel", "nomad", "adventure", "trip", "destination"]):
+        niche = "Travel"
+    elif any(kw in combined for kw in ["food", "cook", "recipe", "restaurant", "eat", "chef"]):
+        niche = "Food"
+    elif any(kw in combined for kw in ["finance", "invest", "stock", "money", "wealth", "market"]):
+        niche = "Finance"
+    elif any(kw in combined for kw in ["music", "song", "artist", "album", "spotify"]):
+        niche = "Music"
+    elif any(kw in combined for kw in ["comedy", "funny", "joke", "humor", "meme"]):
+        niche = "Comedy"
+    
+    logger.info(f"[AI] Fallback analysis: {handle} -> {niche}")
+    
+    return {
+        "niche": niche,
+        "language": "English",
+        "location": "",
+    }
 
 
 def parse_find_query(query: str) -> dict:
     """
-    Use Claude to parse a natural-language /findkol query into structured filters.
-    E.g. "crypto influencer from PH with 100k+ followers" →
-         {niche: "Crypto", location: "Philippines", platform: None, language: None}
+    Parse a /findkol query into structured filters.
+    This is lightweight - minimal AI usage.
     """
-    try:
-        response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=256,
-            system="Parse a KOL search query into JSON filters. Return only JSON.",
-            messages=[
-                {
-                    "role": "user",
-                    "content": (
-                        f"Parse this KOL search query into a JSON with keys: "
-                        f"niche, platform, language, location (null if not mentioned).\n"
-                        f"Query: {query}"
-                    ),
-                }
-            ],
-        )
-        raw = response.content[0].text.strip()
-        raw = re.sub(r"^```(?:json)?\s*", "", raw)
-        raw = re.sub(r"\s*```$", "", raw)
-        return json.loads(raw)
-    except Exception as e:
-        logger.warning(f"Query parsing failed: {e}")
-        # Simple fallback — treat whole query as niche
-        return {"niche": query, "platform": None, "language": None, "location": None}
+    query_lower = query.lower()
+    result = {"niche": None, "platform": None, "language": None, "location": None}
+    
+    # Detect platform
+    if " x " in f" {query_lower} " or "twitter" in query_lower:
+        result["platform"] = "X"
+    elif "tiktok" in query_lower:
+        result["platform"] = "TikTok"
+    elif "youtube" in query_lower or " yt " in f" {query_lower} ":
+        result["platform"] = "YouTube"
+    elif "instagram" in query_lower or " ig " in f" {query_lower} ":
+        result["platform"] = "Instagram"
+    
+    # Detect niches
+    niche_keywords = {
+        "crypto": "Crypto", "defi": "DeFi", "nft": "NFT", "web3": "Web3",
+        "bitcoin": "Bitcoin", "trading": "Trading", "gaming": "Gaming",
+        "tech": "Tech", "ai": "AI", "beauty": "Beauty", "fashion": "Fashion",
+        "fitness": "Fitness", "travel": "Travel", "food": "Food",
+        "finance": "Finance", "music": "Music", "comedy": "Comedy",
+    }
+    for keyword, niche in niche_keywords.items():
+        if keyword in query_lower:
+            result["niche"] = niche
+            break
+    
+    # Detect locations
+    locations = {
+        "ph": "Philippines", "philippines": "Philippines", "filipino": "Philippines", "pinoy": "Philippines",
+        "us": "United States", "usa": "United States", "american": "United States",
+        "uk": "United Kingdom", "british": "United Kingdom",
+        "singapore": "Singapore", "sg": "Singapore",
+        "indonesia": "Indonesia", "indo": "Indonesia",
+        "vietnam": "Vietnam", "vn": "Vietnam",
+        "malaysia": "Malaysia", "my": "Malaysia",
+        "thailand": "Thailand", "thai": "Thailand",
+    }
+    for key, loc in locations.items():
+        if key in query_lower:
+            result["location"] = loc
+            break
+    
+    # Detect languages
+    languages = {
+        "english": "English", "tagalog": "Tagalog", "filipino": "Filipino",
+        "spanish": "Spanish", "chinese": "Chinese", "japanese": "Japanese",
+        "korean": "Korean", "indonesian": "Indonesian", "thai": "Thai",
+    }
+    for key, lang in languages.items():
+        if key in query_lower:
+            result["language"] = lang
+            break
+    
+    # If no niche detected, use first word as potential niche
+    if not result["niche"]:
+        words = query.split()
+        if words:
+            result["niche"] = words[0].capitalize()
+    
+    logger.info(f"[AI] Parsed query '{query}' -> {result}")
+    return result

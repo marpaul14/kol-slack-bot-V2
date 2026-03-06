@@ -1,6 +1,10 @@
 """
 KOL Slack Bot — Main entry point
-Handles Slack slash commands and events.
+
+Commands:
+- /scanall: Scrapes all KOLs using Apify, analyzes 5 posts each, caches results
+- /findkol <query>: Searches cached database (no scraping = cost effective!)
+- /kolstatus: Shows cache statistics
 """
 
 import os
@@ -20,54 +24,54 @@ app = App(token=os.environ["SLACK_BOT_TOKEN"])
 engine = KOLEngine()
 
 
-# ─────────────────────────────────────────────
-# Helper: Send ephemeral message (only visible to one user)
-# ─────────────────────────────────────────────
 def send_private(client, channel: str, user: str, text: str):
-    """Send a message only visible to the specified user."""
+    """Send ephemeral message - only the specified user sees it."""
     try:
         client.chat_postEphemeral(channel=channel, user=user, text=text)
     except Exception as e:
-        logger.warning(f"Failed to send ephemeral message: {e}")
+        logger.warning(f"Failed to send private message: {e}")
 
 
 # ─────────────────────────────────────────────
-# /scanall  — scrape every name row in the sheet
+# /scanall — Scrape all KOLs using Apify
 # ─────────────────────────────────────────────
 @app.command("/scanall")
 def handle_scanall(ack, say, command, client):
     ack()
     channel = command["channel_id"]
-    user    = command["user_id"]
+    user = command["user_id"]
 
-    logger.info(f"[/scanall] Triggered by user {user} in channel {channel}")
+    logger.info(f"[/scanall] Triggered by {user}")
 
-    # Public announcement that scan is starting
+    # Public announcement
     client.chat_postMessage(
         channel=channel,
-        text=f"🔍 <@{user}> triggered *Scan All*. Starting full scan — I'll post results when done.",
+        text=f"🔍 <@{user}> started *Scan All*.\n"
+             f"• Scraping profiles via Apify\n"
+             f"• Analyzing 5 recent posts per KOL\n"
+             f"• Results will be posted when complete.",
     )
 
     def run():
         try:
-            # Progress updates are PRIVATE (only visible to the user who triggered)
+            # Progress updates are PRIVATE
             def progress(msg):
-                logger.info(f"[/scanall] Progress: {msg}")
+                logger.info(f"[/scanall] {msg}")
                 send_private(client, channel, user, msg)
 
             result = engine.scan_all(progress_callback=progress)
             
             logger.info(f"[/scanall] Complete: {result}")
             
-            # Final result is PUBLIC (visible to everyone)
+            # Final result is PUBLIC
             client.chat_postMessage(
                 channel=channel,
                 text=(
-                    f"✅ *Scan All complete!*\n"
+                    f"✅ *Scan All Complete!*\n"
                     f"• Scanned: {result['scanned']}\n"
                     f"• Updated: {result['updated']}\n"
-                    f"• Skipped (cached): {result['cached']}\n"
-                    f"• Errors: {result['errors']}"
+                    f"• Errors: {result['errors']}\n\n"
+                    f"_Use `/findkol <niche>` to search the database._"
                 ),
             )
         except Exception as e:
@@ -78,38 +82,45 @@ def handle_scanall(ack, say, command, client):
 
 
 # ─────────────────────────────────────────────
-# /findkol <query>  — find matching KOLs
+# /findkol <query> — Search cached database only
 # ─────────────────────────────────────────────
 @app.command("/findkol")
 def handle_findkol(ack, say, command, client):
     ack()
     channel = command["channel_id"]
-    user    = command["user_id"]
-    query   = command.get("text", "").strip()
+    user = command["user_id"]
+    query = command.get("text", "").strip()
 
-    logger.info(f"[/findkol] Query: '{query}' by user {user}")
+    logger.info(f"[/findkol] Query: '{query}' by {user}")
 
     if not query:
-        send_private(client, channel, user, 
-            "⚠️ Usage: `/findkol <niche> [platform] [language] [location]`\n"
-            "Example: `/findkol crypto X english philippines`"
+        send_private(client, channel, user,
+            "⚠️ *Usage:* `/findkol <query>`\n\n"
+            "*Examples:*\n"
+            "• `/findkol crypto` — Find crypto KOLs\n"
+            "• `/findkol defi philippines` — DeFi KOLs from PH\n"
+            "• `/findkol gaming english` — Gaming KOLs in English\n"
+            "• `/findkol nft X` — NFT KOLs on X/Twitter\n\n"
+            "_💡 Run `/scanall` first to populate the database._"
         )
         return
-
-    # Private: "searching..." message
-    send_private(client, channel, user, f"🔎 Searching for KOLs matching: *{query}*…")
 
     def run():
         try:
             results = engine.find_kol(query)
-            logger.info(f"[/findkol] Found {len(results)} results for '{query}'")
+            logger.info(f"[/findkol] Found {len(results)} results")
             
             if not results:
-                client.chat_postMessage(channel=channel, text=f"😕 No KOLs found matching: *{query}*")
+                client.chat_postMessage(
+                    channel=channel, 
+                    text=f"😕 No KOLs found matching: *{query}*\n\n"
+                         f"_Try `/scanall` first, or use different keywords._"
+                )
                 return
 
             blocks = _build_kol_blocks(results, query)
             client.chat_postMessage(channel=channel, blocks=blocks, text=f"Found {len(results)} KOL(s)")
+            
         except Exception as e:
             logger.exception("findkol failed")
             client.chat_postMessage(channel=channel, text=f"❌ Find KOL failed: {e}")
@@ -118,32 +129,32 @@ def handle_findkol(ack, say, command, client):
 
 
 # ─────────────────────────────────────────────
-# /kolstatus  — show cache stats
+# /kolstatus — Show cache statistics (private)
 # ─────────────────────────────────────────────
 @app.command("/kolstatus")
 def handle_status(ack, say, command, client):
     ack()
     channel = command["channel_id"]
-    user    = command["user_id"]
+    user = command["user_id"]
     
-    logger.info(f"[/kolstatus] Requested by user {user}")
+    logger.info(f"[/kolstatus] Requested by {user}")
     
     stats = engine.get_status()
     
-    # Send as ephemeral (private) - only requester sees it
     send_private(client, channel, user,
-        f"📊 *KOL Cache Status*\n"
+        f"📊 *KOL Database Status*\n"
         f"• Total rows in sheet: {stats['total_rows']}\n"
-        f"• Cached / scanned: {stats['cached']}\n"
-        f"• Never scanned: {stats['unscanned']}\n"
-        f"• Last full scan: {stats['last_scan'] or 'Never'}"
+        f"• Scanned & cached: {stats['cached']}\n"
+        f"• Not yet scanned: {stats['unscanned']}\n"
+        f"• Last scan: {stats['last_scan'] or 'Never'}\n\n"
+        f"_Run `/scanall` to scan all rows._"
     )
 
 
 # ─────────────────────────────────────────────
-# Block builder helpers
+# Block Builder for /findkol results
 # ─────────────────────────────────────────────
-def _build_kol_blocks(results: list[dict], query: str) -> list:
+def _build_kol_blocks(results: list, query: str) -> list:
     blocks = [
         {
             "type": "header",
@@ -152,54 +163,71 @@ def _build_kol_blocks(results: list[dict], query: str) -> list:
         {"type": "divider"},
     ]
 
-    for kol in results[:10]:  # Slack block limit
-        platform_emoji = {"X": "🐦", "TikTok": "🎵", "YouTube": "▶️", "Instagram": "📸"}.get(kol.get("platform", ""), "🌐")
+    for kol in results[:10]:
+        platform = kol.get("platform", "")
+        platform_emoji = {
+            "X": "🐦", "TikTok": "🎵", "YouTube": "▶️", "Instagram": "📸"
+        }.get(platform, "🌐")
+        
+        # Build info line
+        info_parts = []
+        if kol.get("followers"):
+            info_parts.append(f"👥 {kol['followers']}")
+        if kol.get("niche"):
+            info_parts.append(f"🏷 {kol['niche']}")
+        if kol.get("language"):
+            info_parts.append(f"🌐 {kol['language']}")
+        
+        info_line = "  |  ".join(info_parts) if info_parts else "—"
+        
+        # Build rates line (from manual columns)
         rates = _format_rates(kol)
-
-        blocks.append(
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": (
-                        f"{platform_emoji} *{kol.get('name', 'N/A')}* — `{kol.get('handle', 'N/A')}`\n"
-                        f"📍 {kol.get('location', '—')}  |  🌐 {kol.get('language', '—')}  |  👥 {kol.get('followers', '—')}\n"
-                        f"🏷 Niche: {kol.get('niche', '—')}  |  🏷 Tags: {kol.get('tags', '—')}\n"
-                        f"{rates}"
-                    ),
-                },
-            }
+        
+        text = (
+            f"{platform_emoji} *{kol.get('name', 'N/A')}* — `{kol.get('handle', 'N/A')}`\n"
+            f"{info_line}\n"
         )
+        
+        if kol.get("location"):
+            text += f"📍 {kol['location']}\n"
+        
+        if rates:
+            text += f"{rates}\n"
+        
+        blocks.append({
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": text.strip()},
+        })
         blocks.append({"type": "divider"})
 
     if len(results) > 10:
-        blocks.append(
-            {
-                "type": "context",
-                "elements": [{"type": "mrkdwn", "text": f"_{len(results) - 10} more results not shown. Refine your query._"}],
-            }
-        )
+        blocks.append({
+            "type": "context",
+            "elements": [{"type": "mrkdwn", "text": f"_{len(results) - 10} more results not shown._"}],
+        })
 
     return blocks
 
 
 def _format_rates(kol: dict) -> str:
-    platform = kol.get("platform", "")
+    """Format rate info from manual columns."""
     parts = []
-
-    if platform == "X":
-        for key, label in [("qt", "QT"), ("tweet", "Tweet"), ("longform", "Longform"), ("article", "Article")]:
-            val = kol.get(key)
-            if val:
-                parts.append(f"{label}: {val}")
-    else:
-        val = kol.get("video_rate") or kol.get("qt")
-        if val:
-            parts.append(f"Video Rate: {val}")
-
+    
+    if kol.get("qt"):
+        parts.append(f"QT: {kol['qt']}")
+    if kol.get("tweet"):
+        parts.append(f"Tweet: {kol['tweet']}")
+    if kol.get("longform"):
+        parts.append(f"Thread: {kol['longform']}")
+    if kol.get("article"):
+        parts.append(f"Article: {kol['article']}")
+    
     return "💰 " + "  |  ".join(parts) if parts else ""
 
 
+# ─────────────────────────────────────────────
+# Start Bot
+# ─────────────────────────────────────────────
 if __name__ == "__main__":
     handler = SocketModeHandler(app, os.environ["SLACK_APP_TOKEN"])
     logger.info("KOL Bot starting…")

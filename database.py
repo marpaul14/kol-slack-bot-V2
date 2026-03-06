@@ -1,9 +1,8 @@
 """
-database.py — SQLite-backed cache for scraped KOL data.
+database.py — SQLite-backed cache for KOL data.
 
-All scraped results are stored here so /findkol and subsequent runs
-never pay the scraping cost twice. Cache is only refreshed when
-/scanall is explicitly called.
+All scraped results are stored here so /findkol can query instantly
+without needing to scrape or call AI again.
 """
 
 import sqlite3
@@ -62,8 +61,6 @@ def init_db() -> None:
     logger.info("Database initialised.")
 
 
-# ─── Cache read/write ─────────────────────────────────────────────────────────
-
 def get_cached(row_num: int) -> Optional[dict]:
     with _connect() as conn:
         row = conn.execute(
@@ -76,10 +73,10 @@ def upsert(row_num: int, data: dict) -> None:
     data["row_num"] = row_num
     data.setdefault("scanned_at", datetime.utcnow().isoformat())
 
-    cols   = list(data.keys())
+    cols = list(data.keys())
     placeholders = ", ".join(["?"] * len(cols))
-    col_names    = ", ".join(cols)
-    updates      = ", ".join(f"{c} = excluded.{c}" for c in cols if c != "row_num")
+    col_names = ", ".join(cols)
+    updates = ", ".join(f"{c} = excluded.{c}" for c in cols if c != "row_num")
 
     sql = (
         f"INSERT INTO kol_cache ({col_names}) VALUES ({placeholders}) "
@@ -96,19 +93,17 @@ def delete(row_num: int) -> None:
         conn.commit()
 
 
-def get_all_cached() -> list[dict]:
+def get_all_cached() -> list:
     with _connect() as conn:
         rows = conn.execute("SELECT * FROM kol_cache").fetchall()
     return [dict(r) for r in rows]
 
 
-def get_cached_row_nums() -> set[int]:
+def get_cached_row_nums() -> set:
     with _connect() as conn:
         rows = conn.execute("SELECT row_num FROM kol_cache").fetchall()
     return {r["row_num"] for r in rows}
 
-
-# ─── Meta helpers ─────────────────────────────────────────────────────────────
 
 def set_meta(key: str, value: str) -> None:
     with _connect() as conn:
@@ -125,20 +120,22 @@ def get_meta(key: str) -> Optional[str]:
     return row["value"] if row else None
 
 
-# ─── Search ──────────────────────────────────────────────────────────────────
-
 def search_kols(
     niche: Optional[str] = None,
     platform: Optional[str] = None,
     language: Optional[str] = None,
     location: Optional[str] = None,
-) -> list[dict]:
+) -> list:
+    """
+    Search cached KOLs by filters.
+    This is the ONLY search method - no scraping needed!
+    """
     conditions = []
-    params: list = []
+    params = []
 
     if niche:
-        conditions.append("(LOWER(niche) LIKE ? OR LOWER(tags) LIKE ?)")
-        params += [f"%{niche.lower()}%", f"%{niche.lower()}%"]
+        conditions.append("(LOWER(niche) LIKE ? OR LOWER(tags) LIKE ? OR LOWER(name) LIKE ?)")
+        params += [f"%{niche.lower()}%", f"%{niche.lower()}%", f"%{niche.lower()}%"]
     if platform:
         conditions.append("LOWER(platform) LIKE ?")
         params.append(f"%{platform.lower()}%")
@@ -154,4 +151,5 @@ def search_kols(
 
     with _connect() as conn:
         rows = conn.execute(sql, params).fetchall()
+    
     return [dict(r) for r in rows]
