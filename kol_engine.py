@@ -35,7 +35,7 @@ class KOLEngine:
         """
         Scan all rows in the sheet:
         1. Extract links from Name column (column A)
-        2. Scrape profiles + 5 recent posts using Apify
+        2. Scrape profiles + 10 recent posts using Apify
         3. Analyze posts with AI to determine niche
         4. Save to database (cache)
         5. Write to sheet (ONLY columns B, D, I, J, N, O, P)

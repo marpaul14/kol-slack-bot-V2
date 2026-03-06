@@ -32,7 +32,7 @@ SYSTEM_PROMPT = """You are an expert KOL (Key Opinion Leader) analyst.
 Analyze the social media posts and profile to determine the KOL's content niche and language.
 Always respond with valid JSON only — no markdown, no explanation."""
 
-ANALYSIS_PROMPT = """Analyze this KOL's recent posts and determine their niche.
+ANALYSIS_PROMPT = """Analyze this KOL's recent posts and determine their niche in detail.
 
 PROFILE:
 - Handle: {handle}
@@ -44,16 +44,27 @@ RECENT POSTS (10 posts - analyze these to determine content niche):
 {posts}
 
 Based on the posts above, return JSON with:
-- niche: string — the PRIMARY content topic. Choose ONE from:
-  Crypto, DeFi, NFT, Web3, Bitcoin, Trading, Gaming, Tech, AI, 
-  Beauty, Fashion, Fitness, Travel, Food, Finance, Investing,
-  Music, Comedy, Education, News, Lifestyle, Entertainment, Sports, Other
+- niche: string — a DETAILED niche description with multiple tags separated by " | " and commas.
+  Format: "Primary Niche | Subtopic1, Subtopic2, Subtopic3 | Content Style"
+  
+  Examples of good niche descriptions:
+  - "Trading | Alpha Calls, Market Analysis, Altcoins | Shilling"
+  - "DeFi | Trading, Web3 General, Stablecoins | Education"
+  - "NFT | Web3 General, GameFi, Solana | Shilling, Community"
+  - "Web3 General | News, Scandals/Drama, Memecoins | Commentary"
+  - "Trading & Portfolio Management | Web3 General, Risk Analysis | Education"
+  - "Gaming | Esports, Streaming, Game Reviews | Entertainment"
+  - "Tech | AI, Startups, Programming | Education, News"
+  
+  Primary niches: Crypto, DeFi, NFT, Web3 General, Trading, Gaming, Tech, AI, Beauty, Fashion, Fitness, Travel, Food, Finance, Music, Comedy, Education, News, Lifestyle, Entertainment, Sports
+  
+  Subtopics to consider: Alpha Calls, Market Analysis, Altcoins, Memecoins, Stablecoins, GameFi, Solana, Ethereum, Bitcoin, Layer 1, Layer 2, Airdrops, Token Promotions, Community Building, Shilling, Education, News, Commentary, Drama/Scandals, Portfolio Management, Risk Analysis, Long-term Investing, Day Trading
 
 - language: string — primary language of the posts (English, Filipino, Spanish, etc.)
 
 - location: string — location if mentioned or inferred (or empty string if unknown)
 
-Return ONLY valid JSON like: {{"niche": "Crypto", "language": "English", "location": "Philippines"}}"""
+Return ONLY valid JSON like: {{"niche": "DeFi | Trading, Web3 General, Stablecoins | Education", "language": "English", "location": "Philippines"}}"""
 
 
 def analyze_profile(
@@ -73,7 +84,7 @@ def analyze_profile(
         bio: Profile bio text
         location: Known location
         handle: @handle
-        recent_posts: List of up to 5 recent post texts
+        recent_posts: List of up to 10 recent post texts
     
     Returns:
         Dict with niche, language, location
