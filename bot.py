@@ -19,6 +19,18 @@ logger = logging.getLogger(__name__)
 app = App(token=os.environ["SLACK_BOT_TOKEN"])
 engine = KOLEngine()
 
+
+# ─────────────────────────────────────────────
+# Helper: Send ephemeral message (only visible to one user)
+# ─────────────────────────────────────────────
+def send_private(client, channel: str, user: str, text: str):
+    """Send a message only visible to the specified user."""
+    try:
+        client.chat_postEphemeral(channel=channel, user=user, text=text)
+    except Exception as e:
+        logger.warning(f"Failed to send ephemeral message: {e}")
+
+
 # ─────────────────────────────────────────────
 # /scanall  — scrape every name row in the sheet
 # ─────────────────────────────────────────────
@@ -28,14 +40,26 @@ def handle_scanall(ack, say, command, client):
     channel = command["channel_id"]
     user    = command["user_id"]
 
+    logger.info(f"[/scanall] Triggered by user {user} in channel {channel}")
+
+    # Public announcement that scan is starting
     client.chat_postMessage(
         channel=channel,
-        text=f"🔍 <@{user}> triggered *Scan All*. Starting full scan — I'll update you when done.",
+        text=f"🔍 <@{user}> triggered *Scan All*. Starting full scan — I'll post results when done.",
     )
 
     def run():
         try:
-            result = engine.scan_all(progress_callback=lambda msg: client.chat_postMessage(channel=channel, text=msg))
+            # Progress updates are PRIVATE (only visible to the user who triggered)
+            def progress(msg):
+                logger.info(f"[/scanall] Progress: {msg}")
+                send_private(client, channel, user, msg)
+
+            result = engine.scan_all(progress_callback=progress)
+            
+            logger.info(f"[/scanall] Complete: {result}")
+            
+            # Final result is PUBLIC (visible to everyone)
             client.chat_postMessage(
                 channel=channel,
                 text=(
@@ -63,23 +87,25 @@ def handle_findkol(ack, say, command, client):
     user    = command["user_id"]
     query   = command.get("text", "").strip()
 
+    logger.info(f"[/findkol] Query: '{query}' by user {user}")
+
     if not query:
-        client.chat_postMessage(
-            channel=channel,
-            text="⚠️ Usage: `/findkol <niche> [platform] [language] [location]`\nExample: `/findkol crypto X english philippines`",
+        send_private(client, channel, user, 
+            "⚠️ Usage: `/findkol <niche> [platform] [language] [location]`\n"
+            "Example: `/findkol crypto X english philippines`"
         )
         return
 
-    client.chat_postMessage(
-        channel=channel,
-        text=f"🔎 <@{user}> is searching for KOLs matching: *{query}*…",
-    )
+    # Private: "searching..." message
+    send_private(client, channel, user, f"🔎 Searching for KOLs matching: *{query}*…")
 
     def run():
         try:
             results = engine.find_kol(query)
+            logger.info(f"[/findkol] Found {len(results)} results for '{query}'")
+            
             if not results:
-                client.chat_postMessage(channel=channel, text="😕 No matching KOLs found.")
+                client.chat_postMessage(channel=channel, text=f"😕 No KOLs found matching: *{query}*")
                 return
 
             blocks = _build_kol_blocks(results, query)
@@ -98,16 +124,19 @@ def handle_findkol(ack, say, command, client):
 def handle_status(ack, say, command, client):
     ack()
     channel = command["channel_id"]
-    stats   = engine.get_status()
-    client.chat_postMessage(
-        channel=channel,
-        text=(
-            f"📊 *KOL Cache Status*\n"
-            f"• Total rows in sheet: {stats['total_rows']}\n"
-            f"• Cached / scanned: {stats['cached']}\n"
-            f"• Never scanned: {stats['unscanned']}\n"
-            f"• Last full scan: {stats['last_scan'] or 'Never'}"
-        ),
+    user    = command["user_id"]
+    
+    logger.info(f"[/kolstatus] Requested by user {user}")
+    
+    stats = engine.get_status()
+    
+    # Send as ephemeral (private) - only requester sees it
+    send_private(client, channel, user,
+        f"📊 *KOL Cache Status*\n"
+        f"• Total rows in sheet: {stats['total_rows']}\n"
+        f"• Cached / scanned: {stats['cached']}\n"
+        f"• Never scanned: {stats['unscanned']}\n"
+        f"• Last full scan: {stats['last_scan'] or 'Never'}"
     )
 
 
