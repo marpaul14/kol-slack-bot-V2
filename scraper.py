@@ -29,7 +29,7 @@ except ImportError:
 APIFY_TOKEN = os.environ.get("APIFY_API_KEY", "")
 
 # Apify Actor IDs
-TWITTER_ACTOR = "web.harvester/twitter-scraper"  # Gets profiles + tweets
+TWITTER_ACTOR = "parseforge/x-com-scraper"  # Free pay-per-event, no monthly rental!
 TIKTOK_ACTOR = "clockworks/tiktok-scraper"
 YOUTUBE_ACTOR = "streamers/youtube-channel-scraper"
 INSTAGRAM_ACTOR = "apify/instagram-scraper"
@@ -109,7 +109,7 @@ def scrape_profile(url: str) -> dict:
 
 
 def _scrape_x_apify(url: str) -> dict:
-    """Scrape X/Twitter profile using Apify."""
+    """Scrape X/Twitter profile using Apify parseforge/x-com-scraper."""
     result = {"recent_posts": []}
     handle = _extract_x_handle(url)
     result["handle"] = handle
@@ -119,40 +119,43 @@ def _scrape_x_apify(url: str) -> dict:
         return result
 
     clean_handle = handle.lstrip("@")
+    profile_url = f"https://x.com/{clean_handle}"
     
     try:
         client = ApifyClient(APIFY_TOKEN)
         
-        # Run the Twitter scraper
+        # parseforge/x-com-scraper input format
         run_input = {
-            "handles": [clean_handle],
-            "tweetsDesired": MAX_POSTS,
+            "maxItems": MAX_POSTS,
+            "directUrls": [profile_url],
             "proxyConfig": {"useApifyProxy": True},
         }
         
-        logger.info(f"[Scraper] Running Apify actor for @{clean_handle}")
+        logger.info(f"[Scraper] Running Apify parseforge for @{clean_handle}")
         run = client.actor(TWITTER_ACTOR).call(run_input=run_input, timeout_secs=120)
         
         # Get results from dataset
         items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
         
         if items:
-            profile = items[0]  # First item is usually profile data
-            
-            # Extract profile info
-            result["followers"] = _format_number(profile.get("followersCount", 0))
-            result["raw_bio"] = profile.get("description", "")
-            result["location"] = profile.get("location", "")
-            
-            # Extract recent tweets
-            tweets = profile.get("tweets", []) or items[1:MAX_POSTS+1]
-            for tweet in tweets[:MAX_POSTS]:
-                text = tweet.get("text") or tweet.get("full_text", "")
-                if text and len(text) > 10:
+            # Extract profile info from first item or author metadata
+            for item in items:
+                # Try to get author/profile info
+                author = item.get("author", {}) or item.get("user", {}) or {}
+                
+                if not result.get("followers") and author:
+                    followers = author.get("followers_count") or author.get("followersCount") or author.get("followers", 0)
+                    result["followers"] = _format_number(followers)
+                    result["raw_bio"] = author.get("description") or author.get("bio", "")
+                    result["location"] = author.get("location", "")
+                
+                # Extract tweet text
+                text = item.get("text") or item.get("full_text") or item.get("tweet_text", "")
+                if text and len(text) > 10 and len(result["recent_posts"]) < MAX_POSTS:
                     result["recent_posts"].append(text)
             
-            result["link_status"] = "OK"
-            logger.info(f"[Scraper] Apify success: {result['followers']} followers, "
+            result["link_status"] = "OK" if result["recent_posts"] else "Limited"
+            logger.info(f"[Scraper] Apify success: {result.get('followers', 'N/A')} followers, "
                        f"{len(result['recent_posts'])} posts")
         else:
             logger.warning(f"[Scraper] No data returned for @{clean_handle}")
