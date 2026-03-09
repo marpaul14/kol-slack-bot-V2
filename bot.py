@@ -169,8 +169,10 @@ def handle_findkol(ack, say, command, client):
                 )
                 return
 
-            blocks = _build_kol_blocks(results, query)
-            client.chat_postMessage(channel=channel, blocks=blocks, text=f"Found {len(results)} KOL(s)")
+            # Format as compact code blocks (splits if >30 results)
+            messages = _format_kol_results(results, query)
+            for msg in messages:
+                client.chat_postMessage(channel=channel, text=msg)
             
         except Exception as e:
             logger.exception("findkol failed")
@@ -206,61 +208,55 @@ def handle_status(ack, say, command, client):
 
 
 # ─────────────────────────────────────────────
-# Block Builder for /findkol results
+# Format /findkol results as compact code block
 # ─────────────────────────────────────────────
-def _build_kol_blocks(results: list, query: str) -> list:
-    blocks = [
-        {
-            "type": "header",
-            "text": {"type": "plain_text", "text": f"🎯 KOL Results for \"{query}\""},
-        },
-        {"type": "divider"},
-    ]
+MAX_RESULTS_PER_MESSAGE = 30  # Slack message limit ~4000 chars
 
-    for kol in results[:10]:
-        platform = kol.get("platform", "")
-        platform_emoji = {
-            "X": "🐦", "TikTok": "🎵", "YouTube": "▶️", "Instagram": "📸"
-        }.get(platform, "🌐")
+def _format_kol_results(results: list, query: str, page: int = 1) -> list:
+    """
+    Format KOL results as compact code blocks.
+    Returns a list of messages (splits if too many results).
+    """
+    if not results:
+        return [f"😕 No KOLs found matching: *{query}*"]
+    
+    messages = []
+    total = len(results)
+    
+    # Split results into chunks
+    for i in range(0, total, MAX_RESULTS_PER_MESSAGE):
+        chunk = results[i:i + MAX_RESULTS_PER_MESSAGE]
+        chunk_start = i + 1
+        chunk_end = min(i + MAX_RESULTS_PER_MESSAGE, total)
         
-        # Build info line
-        info_parts = []
-        if kol.get("followers"):
-            info_parts.append(f"👥 {kol['followers']}")
-        if kol.get("niche"):
-            info_parts.append(f"🏷 {kol['niche']}")
-        if kol.get("language"):
-            info_parts.append(f"🌐 {kol['language']}")
+        lines = []
         
-        info_line = "  |  ".join(info_parts) if info_parts else "—"
+        # Header only on first message
+        if i == 0:
+            lines.append(f"🎯 Found *{total}* KOL(s) for \"{query}\"")
+            lines.append("")
+        else:
+            lines.append(f"📄 Results {chunk_start}-{chunk_end} of {total}")
+            lines.append("")
         
-        # Build rates line (from manual columns)
-        rates = _format_rates(kol)
+        lines.append("```")
+        lines.append(f"{'Name':<20} {'Handle':<18} {'Niche':<40} {'Lang':<8} {'Loc':<12}")
+        lines.append("-" * 100)
         
-        text = (
-            f"{platform_emoji} *{kol.get('name', 'N/A')}* — `{kol.get('handle', 'N/A')}`\n"
-            f"{info_line}\n"
-        )
+        for kol in chunk:
+            name = (kol.get("name") or "N/A")[:19]
+            handle = (kol.get("handle") or "N/A")[:17]
+            niche = (kol.get("niche") or "N/A")[:39]
+            lang = (kol.get("language") or "N/A")[:7]
+            location = (kol.get("location") or "N/A")[:11]
+            
+            lines.append(f"{name:<20} {handle:<18} {niche:<40} {lang:<8} {location:<12}")
         
-        if kol.get("location"):
-            text += f"📍 {kol['location']}\n"
+        lines.append("```")
         
-        if rates:
-            text += f"{rates}\n"
-        
-        blocks.append({
-            "type": "section",
-            "text": {"type": "mrkdwn", "text": text.strip()},
-        })
-        blocks.append({"type": "divider"})
-
-    if len(results) > 10:
-        blocks.append({
-            "type": "context",
-            "elements": [{"type": "mrkdwn", "text": f"_{len(results) - 10} more results not shown._"}],
-        })
-
-    return blocks
+        messages.append("\n".join(lines))
+    
+    return messages
 
 
 def _format_rates(kol: dict) -> str:
