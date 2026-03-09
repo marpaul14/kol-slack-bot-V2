@@ -3,6 +3,7 @@ KOL Slack Bot — Main entry point
 
 Commands:
 - /scanall: Scrapes all KOLs using Apify, analyzes 10 posts each, caches results
+- /scannew: Only scans rows missing Handle, Language, or Niche (cost-effective!)
 - /findkol <query>: Searches cached database (no scraping = cost effective!)
 - /kolstatus: Shows cache statistics
 """
@@ -82,6 +83,56 @@ def handle_scanall(ack, say, command, client):
 
 
 # ─────────────────────────────────────────────
+# /scannew — Only scan rows missing data
+# ─────────────────────────────────────────────
+@app.command("/scannew")
+def handle_scannew(ack, say, command, client):
+    ack()
+    channel = command["channel_id"]
+    user = command["user_id"]
+
+    logger.info(f"[/scannew] Triggered by {user}")
+
+    # Public announcement
+    client.chat_postMessage(
+        channel=channel,
+        text=f"🔍 <@{user}> started *Scan New/Incomplete*.\n"
+             f"• Only scanning rows missing Handle, Language, Location, or Niche\n"
+             f"• Skipping rows that already have all data\n"
+             f"• Results will be posted when complete.",
+    )
+
+    def run():
+        try:
+            # Progress updates are PRIVATE
+            def progress(msg):
+                logger.info(f"[/scannew] {msg}")
+                send_private(client, channel, user, msg)
+
+            result = engine.scan_incomplete(progress_callback=progress)
+            
+            logger.info(f"[/scannew] Complete: {result}")
+            
+            # Final result is PUBLIC
+            client.chat_postMessage(
+                channel=channel,
+                text=(
+                    f"✅ *Scan Incomplete Complete!*\n"
+                    f"• Scanned: {result['scanned']}\n"
+                    f"• Updated: {result['updated']}\n"
+                    f"• Skipped (no link): {result['skipped']}\n"
+                    f"• Errors: {result['errors']}\n\n"
+                    f"_Use `/findkol <niche>` to search the database._"
+                ),
+            )
+        except Exception as e:
+            logger.exception("scannew failed")
+            client.chat_postMessage(channel=channel, text=f"❌ Scan New failed: {e}")
+
+    threading.Thread(target=run, daemon=True).start()
+
+
+# ─────────────────────────────────────────────
 # /findkol <query> — Search cached database only
 # ─────────────────────────────────────────────
 @app.command("/findkol")
@@ -146,8 +197,11 @@ def handle_status(ack, say, command, client):
         f"• Total rows in sheet: {stats['total_rows']}\n"
         f"• Scanned & cached: {stats['cached']}\n"
         f"• Not yet scanned: {stats['unscanned']}\n"
+        f"• Incomplete (missing Handle/Language/Location/Niche): {stats.get('incomplete', 'N/A')}\n"
         f"• Last scan: {stats['last_scan'] or 'Never'}\n\n"
-        f"_Run `/scanall` to scan all rows._"
+        f"_Commands:_\n"
+        f"• `/scanall` — Scan all rows\n"
+        f"• `/scannew` — Only scan incomplete rows (saves cost!)"
     )
 
 
