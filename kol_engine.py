@@ -61,8 +61,27 @@ class KOLEngine:
             if not url:
                 logger.debug(f"[scan_all] Row {row_num}: No link")
                 self._sheets.update_row_fields(row_num, {"link_status": "No Link"})
+                # Still cache sheet data so /findkol can search this row
+                db.upsert(row_num, {
+                    "name": name,
+                    "handle": row.get("handle", ""),
+                    "platform": row.get("platform", ""),
+                    "followers": row.get("followers", ""),
+                    "qt": row.get("qt", ""),
+                    "tweet": row.get("tweet", ""),
+                    "longform": row.get("longform", ""),
+                    "article": row.get("article", ""),
+                    "language": row.get("language", ""),
+                    "location": row.get("location", ""),
+                    "tags": row.get("tags", ""),
+                    "contact": row.get("contact", ""),
+                    "notes": row.get("notes", ""),
+                    "niche": row.get("niche", ""),
+                    "link_status": "No Link",
+                })
+                stats["cached"] += 1
                 continue
-                
+
             try:
                 logger.info(f"[scan_all] Row {row_num}: {name}")
                 
@@ -126,6 +145,25 @@ class KOLEngine:
             except Exception as e:
                 logger.exception(f"[scan_all] Error on row {row_num}: {e}")
                 self._sheets.update_row_fields(row_num, {"link_status": "Error"})
+                # Still cache sheet data so /findkol can search this row
+                db.upsert(row_num, {
+                    "name": name,
+                    "handle": row.get("handle", ""),
+                    "platform": row.get("platform", ""),
+                    "followers": row.get("followers", ""),
+                    "qt": row.get("qt", ""),
+                    "tweet": row.get("tweet", ""),
+                    "longform": row.get("longform", ""),
+                    "article": row.get("article", ""),
+                    "language": row.get("language", ""),
+                    "location": row.get("location", ""),
+                    "tags": row.get("tags", ""),
+                    "contact": row.get("contact", ""),
+                    "notes": row.get("notes", ""),
+                    "niche": row.get("niche", ""),
+                    "link_status": "Error",
+                    "profile_url": url,
+                })
                 stats["errors"] += 1
 
             # Progress update (private to user who triggered)
@@ -239,9 +277,27 @@ class KOLEngine:
             if not url:
                 logger.debug(f"[scan_incomplete] Row {row_num}: No link")
                 self._sheets.update_row_fields(row_num, {"link_status": "No Link"})
+                # Still cache sheet data so /findkol can search this row
+                db.upsert(row_num, {
+                    "name": name,
+                    "handle": row.get("handle", ""),
+                    "platform": row.get("platform", ""),
+                    "followers": row.get("followers", ""),
+                    "qt": row.get("qt", ""),
+                    "tweet": row.get("tweet", ""),
+                    "longform": row.get("longform", ""),
+                    "article": row.get("article", ""),
+                    "language": row.get("language", ""),
+                    "location": row.get("location", ""),
+                    "tags": row.get("tags", ""),
+                    "contact": row.get("contact", ""),
+                    "notes": row.get("notes", ""),
+                    "niche": row.get("niche", ""),
+                    "link_status": "No Link",
+                })
                 stats["skipped_no_link"] += 1
                 continue
-                
+
             try:
                 logger.info(f"[scan_incomplete] Row {row_num}: {name}")
                 
@@ -304,6 +360,25 @@ class KOLEngine:
             except Exception as e:
                 logger.exception(f"[scan_incomplete] Error on row {row_num}: {e}")
                 self._sheets.update_row_fields(row_num, {"link_status": "Error"})
+                # Still cache sheet data so /findkol can search this row
+                db.upsert(row_num, {
+                    "name": name,
+                    "handle": row.get("handle", ""),
+                    "platform": row.get("platform", ""),
+                    "followers": row.get("followers", ""),
+                    "qt": row.get("qt", ""),
+                    "tweet": row.get("tweet", ""),
+                    "longform": row.get("longform", ""),
+                    "article": row.get("article", ""),
+                    "language": row.get("language", ""),
+                    "location": row.get("location", ""),
+                    "tags": row.get("tags", ""),
+                    "contact": row.get("contact", ""),
+                    "notes": row.get("notes", ""),
+                    "niche": row.get("niche", ""),
+                    "link_status": "Error",
+                    "profile_url": url,
+                })
                 stats["errors"] += 1
 
             # Progress update

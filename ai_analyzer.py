@@ -13,6 +13,7 @@ This runs ONCE during /scanall and results are cached.
 
 import os
 import json
+import html
 import logging
 import re
 
@@ -255,6 +256,19 @@ def _fallback_analysis(handle: str, bio: str, posts: list) -> dict:
     }
 
 
+# Location aliases for expanding shorthand location filters
+LOCATION_ALIASES = {
+    "ph": "Philippines", "philippines": "Philippines", "filipino": "Philippines", "pinoy": "Philippines",
+    "us": "United States", "usa": "United States", "american": "United States",
+    "uk": "United Kingdom", "british": "United Kingdom",
+    "singapore": "Singapore", "sg": "Singapore",
+    "indonesia": "Indonesia", "indo": "Indonesia",
+    "vietnam": "Vietnam", "vn": "Vietnam",
+    "malaysia": "Malaysia", "my": "Malaysia",
+    "thailand": "Thailand", "thai": "Thailand",
+}
+
+
 def parse_find_query(query: str) -> dict:
     """
     Parse a /findkol query into structured filters.
@@ -265,6 +279,9 @@ def parse_find_query(query: str) -> dict:
 
     Multi-word values use hyphens/underscores: niche:technical-analysis
     """
+    # Decode Slack HTML entities (e.g. &lt; -> <, &gt; -> >)
+    query = html.unescape(query)
+
     result = {
         "niche": None, "niche_terms": None, "platform": None,
         "language": None, "location": None,
@@ -285,22 +302,27 @@ def parse_find_query(query: str) -> dict:
         "followers": "followers", "follower_count": "followers",
     }
 
-    # Extract key:value pairs
-    kv_pairs = re.findall(r'(\w+):(\S+)', query)
+    # Extract key:value pairs (allows optional space after colon, supports quoted values)
+    kv_pairs = re.findall(r'(\w+):\s*("(?:[^"]*)"|\S+)', query)
 
     if kv_pairs:
         # Process key:value pairs
         for key, value in kv_pairs:
+            # Strip surrounding quotes from values like "300-500"
+            value = value.strip('"')
             canonical = KEY_ALIASES.get(key.lower())
             if canonical:
                 # Replace hyphens/underscores with spaces for text filters
                 if canonical not in ("qt_rate", "tweet_rate", "longform_rate",
                                      "article_rate", "followers"):
                     value = value.replace("-", " ").replace("_", " ")
+                # Expand location aliases (e.g. USA -> United States)
+                if canonical == "location":
+                    value = LOCATION_ALIASES.get(value.lower(), value)
                 result[canonical] = value
 
         # Process leftover free-text (after removing key:value pairs)
-        leftover = re.sub(r'\w+:\S+', '', query).strip()
+        leftover = re.sub(r'\w+:\s*(?:"[^"]*"|\S+)', '', query).strip()
         if leftover:
             _parse_freetext(leftover.lower(), result)
     else:
@@ -342,18 +364,8 @@ def _parse_freetext(query_lower: str, result: dict) -> None:
                 break
 
     # Detect locations
-    locations = {
-        "ph": "Philippines", "philippines": "Philippines", "filipino": "Philippines", "pinoy": "Philippines",
-        "us": "United States", "usa": "United States", "american": "United States",
-        "uk": "United Kingdom", "british": "United Kingdom",
-        "singapore": "Singapore", "sg": "Singapore",
-        "indonesia": "Indonesia", "indo": "Indonesia",
-        "vietnam": "Vietnam", "vn": "Vietnam",
-        "malaysia": "Malaysia", "my": "Malaysia",
-        "thailand": "Thailand", "thai": "Thailand",
-    }
     if not result["location"]:
-        for key, loc in locations.items():
+        for key, loc in LOCATION_ALIASES.items():
             if key in query_lower:
                 result["location"] = loc
                 break
