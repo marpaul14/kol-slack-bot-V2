@@ -148,33 +148,43 @@ def handle_findkol(ack, say, command, client):
     if not query:
         send_private(client, channel, user,
             "⚠️ *Usage:* `/findkol <query>`\n\n"
-            "*Examples:*\n"
+            "*Key:Value Filters:*\n"
+            "• `/findkol niche:DeFi location:USA` — DeFi KOLs from USA\n"
+            "• `/findkol niche:Trading platform:X qt:300-500` — Traders on X with QT rate $300-$500\n"
+            "• `/findkol niche:Gaming tweet:>200` — Gaming KOLs with tweet rate above $200\n"
+            "• `/findkol niche:NFT followers:>10000` — NFT KOLs with 10k+ followers\n\n"
+            "*Available filters:* `niche`, `platform`, `language` (or `lang`), `location` (or `loc`), "
+            "`qt` (or `qt_rate`), `tweet` (or `tweet_rate`), `longform` (or `thread`), `article`, `followers`\n\n"
+            "*Rate formats:* `300` (exact), `300-500` (range), `>300` (min), `<500` (max)\n\n"
+            "*Free-text also works:*\n"
             "• `/findkol crypto` — Find crypto KOLs\n"
-            "• `/findkol defi philippines` — DeFi KOLs from PH\n"
-            "• `/findkol gaming english` — Gaming KOLs in English\n"
-            "• `/findkol nft X` — NFT KOLs on X/Twitter\n\n"
+            "• `/findkol defi philippines` — DeFi KOLs from PH\n\n"
             "_💡 Run `/scanall` first to populate the database._"
         )
         return
 
     def run():
         try:
-            results = engine.find_kol(query)
+            results, filters = engine.find_kol(query)
             logger.info(f"[/findkol] Found {len(results)} results")
-            
+
             if not results:
                 client.chat_postMessage(
-                    channel=channel, 
+                    channel=channel,
                     text=f"😕 No KOLs found matching: *{query}*\n\n"
                          f"_Try `/scanall` first, or use different keywords._"
                 )
                 return
 
+            # Show rates in output when rate filters are active
+            show_rates = any(filters.get(k) for k in
+                            ("qt_rate", "tweet_rate", "longform_rate", "article_rate"))
+
             # Format as compact code blocks (splits if >30 results)
-            messages = _format_kol_results(results, query)
+            messages = _format_kol_results(results, query, show_rates=show_rates)
             for msg in messages:
                 client.chat_postMessage(channel=channel, text=msg)
-            
+
         except Exception as e:
             logger.exception("findkol failed")
             client.chat_postMessage(channel=channel, text=f"❌ Find KOL failed: {e}")
@@ -213,25 +223,26 @@ def handle_status(ack, say, command, client):
 # ─────────────────────────────────────────────
 MAX_RESULTS_PER_MESSAGE = 30  # Slack message limit ~4000 chars
 
-def _format_kol_results(results: list, query: str, page: int = 1) -> list:
+def _format_kol_results(results: list, query: str, page: int = 1, show_rates: bool = False) -> list:
     """
     Format KOL results as compact code blocks.
     Returns a list of messages (splits if too many results).
+    When show_rates=True, includes QT/Tweet/Thread/Article rate columns.
     """
     if not results:
         return [f"😕 No KOLs found matching: *{query}*"]
-    
+
     messages = []
     total = len(results)
-    
+
     # Split results into chunks
     for i in range(0, total, MAX_RESULTS_PER_MESSAGE):
         chunk = results[i:i + MAX_RESULTS_PER_MESSAGE]
         chunk_start = i + 1
         chunk_end = min(i + MAX_RESULTS_PER_MESSAGE, total)
-        
+
         lines = []
-        
+
         # Header only on first message
         if i == 0:
             lines.append(f"🎯 Found *{total}* KOL(s) for \"{query}\"")
@@ -239,24 +250,49 @@ def _format_kol_results(results: list, query: str, page: int = 1) -> list:
         else:
             lines.append(f"📄 Results {chunk_start}-{chunk_end} of {total}")
             lines.append("")
-        
+
         lines.append("```")
-        lines.append(f"{'Name':<20} {'Handle':<18} {'Niche':<40} {'Lang':<8} {'Loc':<12}")
-        lines.append("-" * 100)
-        
+        if show_rates:
+            lines.append(
+                f"{'Name':<18} {'Handle':<16} {'Niche':<30} "
+                f"{'QT':<8} {'Tweet':<8} {'Thread':<8} {'Article':<8} "
+                f"{'Lang':<7} {'Loc':<10}"
+            )
+            lines.append("-" * 125)
+        else:
+            lines.append(f"{'Name':<20} {'Handle':<18} {'Niche':<40} {'Lang':<8} {'Loc':<12}")
+            lines.append("-" * 100)
+
         for kol in chunk:
-            name = (kol.get("name") or "N/A")[:19]
-            handle = (kol.get("handle") or "N/A")[:17]
-            niche = (kol.get("niche") or "N/A")[:39]
-            lang = (kol.get("language") or "N/A")[:7]
-            location = (kol.get("location") or "N/A")[:11]
-            
-            lines.append(f"{name:<20} {handle:<18} {niche:<40} {lang:<8} {location:<12}")
-        
+            if show_rates:
+                name = (kol.get("name") or "N/A")[:17]
+                handle = (kol.get("handle") or "N/A")[:15]
+                niche = (kol.get("niche") or "N/A")[:29]
+                qt = (kol.get("qt") or "-")[:7]
+                tweet = (kol.get("tweet") or "-")[:7]
+                longform = (kol.get("longform") or "-")[:7]
+                article = (kol.get("article") or "-")[:7]
+                lang = (kol.get("language") or "N/A")[:6]
+                location = (kol.get("location") or "N/A")[:9]
+
+                lines.append(
+                    f"{name:<18} {handle:<16} {niche:<30} "
+                    f"{qt:<8} {tweet:<8} {longform:<8} {article:<8} "
+                    f"{lang:<7} {location:<10}"
+                )
+            else:
+                name = (kol.get("name") or "N/A")[:19]
+                handle = (kol.get("handle") or "N/A")[:17]
+                niche = (kol.get("niche") or "N/A")[:39]
+                lang = (kol.get("language") or "N/A")[:7]
+                location = (kol.get("location") or "N/A")[:11]
+
+                lines.append(f"{name:<20} {handle:<18} {niche:<40} {lang:<8} {location:<12}")
+
         lines.append("```")
-        
+
         messages.append("\n".join(lines))
-    
+
     return messages
 
 

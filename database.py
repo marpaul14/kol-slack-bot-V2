@@ -5,6 +5,7 @@ All scraped results are stored here so /findkol can query instantly
 without needing to scrape or call AI again.
 """
 
+import re
 import sqlite3
 import logging
 from datetime import datetime
@@ -120,22 +121,90 @@ def get_meta(key: str) -> Optional[str]:
     return row["value"] if row else None
 
 
+def _parse_rate_filter(value: str) -> dict:
+    """Parse a rate filter value into min/max bounds.
+
+    Formats: "300-500", ">300", "<500", "300"
+    """
+    value = value.strip()
+    if "-" in value and not value.startswith(">") and not value.startswith("<"):
+        parts = value.split("-", 1)
+        try:
+            return {"min": float(parts[0]), "max": float(parts[1])}
+        except ValueError:
+            return {"min": None, "max": None}
+    if value.startswith(">"):
+        try:
+            return {"min": float(value[1:]), "max": None}
+        except ValueError:
+            return {"min": None, "max": None}
+    if value.startswith("<"):
+        try:
+            return {"min": None, "max": float(value[1:])}
+        except ValueError:
+            return {"min": None, "max": None}
+    try:
+        v = float(value)
+        return {"min": v, "max": v}
+    except ValueError:
+        return {"min": None, "max": None}
+
+
+def _extract_numeric(text: str) -> Optional[float]:
+    """Extract the first numeric value from a text field like '$300', '300 USD', etc."""
+    if not text:
+        return None
+    cleaned = text.replace(",", "")
+    m = re.search(r'[\d]+\.?\d*', cleaned)
+    return float(m.group()) if m else None
+
+
+def _matches_rate(row_value: str, filter_value: str) -> bool:
+    """Check if a row's rate value matches the filter range."""
+    num = _extract_numeric(row_value)
+    if num is None:
+        return False
+    bounds = _parse_rate_filter(filter_value)
+    if bounds["min"] is not None and num < bounds["min"]:
+        return False
+    if bounds["max"] is not None and num > bounds["max"]:
+        return False
+    return True
+
+
 def search_kols(
     niche: Optional[str] = None,
+    niche_terms: Optional[list] = None,
     platform: Optional[str] = None,
     language: Optional[str] = None,
     location: Optional[str] = None,
+    qt_rate: Optional[str] = None,
+    tweet_rate: Optional[str] = None,
+    longform_rate: Optional[str] = None,
+    article_rate: Optional[str] = None,
+    followers: Optional[str] = None,
 ) -> list:
     """
     Search cached KOLs by filters.
     This is the ONLY search method - no scraping needed!
+
+    Text filters (niche, platform, language, location) are handled in SQL.
+    Numeric filters (rates, followers) are post-filtered in Python.
     """
     conditions = []
     params = []
 
-    if niche:
+    # Niche: use expanded synonym terms if available
+    if niche_terms and len(niche_terms) > 1:
+        term_conditions = []
+        for term in niche_terms:
+            term_conditions.append("LOWER(niche) LIKE ? OR LOWER(tags) LIKE ? OR LOWER(name) LIKE ?")
+            params += [f"%{term.lower()}%", f"%{term.lower()}%", f"%{term.lower()}%"]
+        conditions.append("(" + " OR ".join(term_conditions) + ")")
+    elif niche:
         conditions.append("(LOWER(niche) LIKE ? OR LOWER(tags) LIKE ? OR LOWER(name) LIKE ?)")
         params += [f"%{niche.lower()}%", f"%{niche.lower()}%", f"%{niche.lower()}%"]
+
     if platform:
         conditions.append("LOWER(platform) LIKE ?")
         params.append(f"%{platform.lower()}%")
@@ -151,5 +220,20 @@ def search_kols(
 
     with _connect() as conn:
         rows = conn.execute(sql, params).fetchall()
-    
-    return [dict(r) for r in rows]
+
+    results = [dict(r) for r in rows]
+
+    # Post-filter for numeric fields (rates and followers)
+    rate_filters = {
+        "qt": qt_rate,
+        "tweet": tweet_rate,
+        "longform": longform_rate,
+        "article": article_rate,
+        "followers": followers,
+    }
+
+    for col, filter_val in rate_filters.items():
+        if filter_val:
+            results = [r for r in results if _matches_rate(r.get(col, ""), filter_val)]
+
+    return results
