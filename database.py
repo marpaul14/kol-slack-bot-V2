@@ -165,6 +165,9 @@ def _matches_rate(row_value: str, filter_value: str) -> bool:
     if num is None:
         return False
     bounds = _parse_rate_filter(filter_value)
+    # If filter couldn't be parsed at all, match nothing (not everything)
+    if bounds["min"] is None and bounds["max"] is None:
+        return False
     if bounds["min"] is not None and num < bounds["min"]:
         return False
     if bounds["max"] is not None and num > bounds["max"]:
