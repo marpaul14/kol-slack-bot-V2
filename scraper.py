@@ -29,7 +29,7 @@ except ImportError:
 APIFY_TOKEN = os.environ.get("APIFY_API_KEY", "")
 
 # Apify Actor IDs
-TWITTER_ACTOR = "parseforge/x-com-scraper"  # Free pay-per-event, no monthly rental!
+TWITTER_ACTOR = "danek/twitter-profile-ppr"  # Pay-per-result profile scraper
 TIKTOK_ACTOR = "clockworks/tiktok-scraper"
 YOUTUBE_ACTOR = "streamers/youtube-channel-scraper"
 INSTAGRAM_ACTOR = "apify/instagram-profile-scraper"
@@ -109,62 +109,55 @@ def scrape_profile(url: str) -> dict:
 
 
 def _scrape_x_apify(url: str) -> dict:
-    """Scrape X/Twitter profile using Apify parseforge/x-com-scraper."""
+    """Scrape X/Twitter profile using Apify danek/twitter-profile-ppr."""
     result = {"recent_posts": []}
     handle = _extract_x_handle(url)
     result["handle"] = handle
-    
+
     if not handle:
         result["link_status"] = "Invalid URL"
         return result
 
     clean_handle = handle.lstrip("@")
-    profile_url = f"https://x.com/{clean_handle}"
-    
+
     try:
         client = ApifyClient(APIFY_TOKEN)
-        
-        # parseforge/x-com-scraper input format
+
+        # danek/twitter-profile-ppr input format — takes usernames
         run_input = {
-            "maxItems": MAX_POSTS,
-            "directUrls": [profile_url],
-            "proxyConfig": {"useApifyProxy": True},
+            "usernames": [clean_handle],
         }
-        
-        logger.info(f"[Scraper] Running Apify parseforge for @{clean_handle}")
+
+        logger.info(f"[Scraper] Running Apify danek/twitter-profile-ppr for @{clean_handle}")
         run = client.actor(TWITTER_ACTOR).call(run_input=run_input, timeout_secs=120)
-        
+
         # Get results from dataset
         items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
-        
+
         if items:
-            # Extract profile info from first item or author metadata
-            for item in items:
-                # Try to get author/profile info
-                author = item.get("author", {}) or item.get("user", {}) or {}
-                
-                if not result.get("followers") and author:
-                    followers = author.get("followers_count") or author.get("followersCount") or author.get("followers", 0)
-                    result["followers"] = _format_number(followers)
-                    result["raw_bio"] = author.get("description") or author.get("bio", "")
-                    result["location"] = author.get("location", "")
-                
-                # Extract tweet text
-                text = item.get("text") or item.get("full_text") or item.get("tweet_text", "")
-                if text and len(text) > 10 and len(result["recent_posts"]) < MAX_POSTS:
-                    result["recent_posts"].append(text)
-            
-            result["link_status"] = "OK" if result["recent_posts"] else "Limited"
-            logger.info(f"[Scraper] Apify success: {result.get('followers', 'N/A')} followers, "
-                       f"{len(result['recent_posts'])} posts")
+            item = items[0]  # Profile scraper returns one item per username
+            logger.debug(f"[Scraper] Raw Apify response keys: {list(item.keys())}")
+
+            # Extract profile data (try multiple field name conventions)
+            followers = (item.get("followersCount")
+                        or item.get("followers_count")
+                        or item.get("followers", 0))
+            result["followers"] = _format_number(followers)
+            result["raw_bio"] = (item.get("description")
+                                or item.get("bio", ""))
+            result["location"] = item.get("location", "")
+
+            # danek/twitter-profile-ppr is profile-only — no recent posts
+            result["link_status"] = "OK"
+            logger.info(f"[Scraper] Apify success: {result.get('followers', 'N/A')} followers")
         else:
             logger.warning(f"[Scraper] No data returned for @{clean_handle}")
             result["link_status"] = "Limited"
-            
+
     except Exception as e:
         logger.error(f"[Scraper] Apify error for @{clean_handle}: {e}")
         result["link_status"] = "Limited"
-    
+
     return result
 
 
