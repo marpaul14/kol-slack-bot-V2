@@ -3,7 +3,7 @@ scraper.py — Scrapes social media profiles using Apify.
 
 Uses Apify actors to get:
 - Profile info (followers, bio, location)
-- 10 recent posts (for niche detection by AI)
+- 5 recent posts (for niche detection by AI)
 
 Supported platforms: X/Twitter, TikTok, YouTube, Instagram
 """
@@ -32,9 +32,9 @@ APIFY_TOKEN = os.environ.get("APIFY_API_KEY", "")
 TWITTER_ACTOR = "parseforge/x-com-scraper"  # Free pay-per-event, no monthly rental!
 TIKTOK_ACTOR = "clockworks/tiktok-scraper"
 YOUTUBE_ACTOR = "streamers/youtube-channel-scraper"
-INSTAGRAM_ACTOR = "apify/instagram-scraper"
+INSTAGRAM_ACTOR = "apify/instagram-profile-scraper"
 
-MAX_POSTS = 10  # Scrape 10 recent posts for niche detection
+MAX_POSTS = 5  # Scrape 5 recent posts for niche detection (lower = less Apify spend)
 
 
 def detect_platform(url: str) -> str:
@@ -61,7 +61,7 @@ def scrape_profile(url: str) -> dict:
       - followers: follower count string
       - location: profile location
       - raw_bio: profile bio
-      - recent_posts: list of up to 10 recent post texts
+      - recent_posts: list of up to 5 recent post texts
       - link_status: OK, Limited, Error, No Link
     """
     if not url:
@@ -247,41 +247,56 @@ def _scrape_youtube_apify(url: str) -> dict:
 
 
 def _scrape_instagram_apify(url: str) -> dict:
-    """Scrape Instagram profile using Apify."""
+    """Scrape Instagram profile using Apify instagram-profile-scraper.
+
+    This actor returns profile data (bio, followers, location) and latest posts.
+    """
     result = {"recent_posts": []}
     handle = _extract_handle_from_path(url, "")
     result["handle"] = f"@{handle}" if handle else ""
-    
+
     try:
         client = ApifyClient(APIFY_TOKEN)
-        
+
+        # instagram-profile-scraper accepts usernames or URLs via usernames field
         run_input = {
-            "directUrls": [url],
+            "usernames": [handle] if handle else [],
             "resultsLimit": MAX_POSTS,
         }
-        
+
         run = client.actor(INSTAGRAM_ACTOR).call(run_input=run_input, timeout_secs=120)
         items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
-        
+
         if items:
             for item in items:
+                # Profile-level fields from instagram-profile-scraper
                 if item.get("followersCount"):
                     result["followers"] = _format_number(item["followersCount"])
                 if item.get("biography"):
                     result["raw_bio"] = item["biography"]
-                
+                if item.get("city") or item.get("location"):
+                    result["location"] = item.get("city") or item.get("location", "")
+
+                # Extract recent posts from latestPosts array
+                latest_posts = item.get("latestPosts", [])
+                for post in latest_posts:
+                    caption = post.get("caption", "") if isinstance(post, dict) else ""
+                    if caption and len(caption) > 10 and len(result["recent_posts"]) < MAX_POSTS:
+                        result["recent_posts"].append(caption)
+
+                # Also check top-level caption (some response formats)
                 caption = item.get("caption", "")
                 if caption and len(caption) > 10 and len(result["recent_posts"]) < MAX_POSTS:
                     result["recent_posts"].append(caption)
-            
+
             result["link_status"] = "OK"
         else:
             result["link_status"] = "Limited"
-            
+
     except Exception as e:
         logger.error(f"[Scraper] Instagram Apify error: {e}")
         result["link_status"] = "Limited"
-    
+
     return result
 
 

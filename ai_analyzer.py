@@ -2,8 +2,8 @@
 ai_analyzer.py — Uses Claude Haiku (cheapest model) to analyze KOL posts.
 
 Process:
-1. Apify scrapes 10 recent posts
-2. Claude Haiku analyzes posts to determine niche & language
+1. Apify scrapes 5 recent posts + bio
+2. Claude Haiku analyzes bio and posts to determine niche & language
 
 Cost: ~$0.25 per 1M tokens (very cheap!)
 
@@ -29,10 +29,10 @@ except ImportError:
 
 
 SYSTEM_PROMPT = """You are an expert KOL (Key Opinion Leader) analyst.
-Analyze the social media posts and profile to determine the KOL's content niche and language.
+Analyze the social media profile bio and recent posts to determine the KOL's content niche and language.
 Always respond with valid JSON only — no markdown, no explanation."""
 
-ANALYSIS_PROMPT = """Analyze this KOL's recent posts and determine their niche in detail.
+ANALYSIS_PROMPT = """Analyze this KOL's bio and recent posts to determine their niche in detail.
 
 PROFILE:
 - Handle: {handle}
@@ -40,10 +40,10 @@ PROFILE:
 - Bio: {bio}
 - Location: {location}
 
-RECENT POSTS (10 posts - analyze these to determine content niche):
+RECENT POSTS (up to 5 posts - read these alongside the bio to determine content niche):
 {posts}
 
-Based on the posts above, return JSON with:
+Based on the bio AND the posts above, return JSON with:
 - niche: string — a DETAILED niche description with multiple tags separated by " | " and commas.
   Format: "Primary Niche | Subtopic1, Subtopic2, Subtopic3 | Content Style"
   
@@ -84,7 +84,7 @@ def analyze_profile(
         bio: Profile bio text
         location: Known location
         handle: @handle
-        recent_posts: List of up to 10 recent post texts
+        recent_posts: List of up to 5 recent post texts
     
     Returns:
         Dict with niche, language, location
@@ -98,7 +98,7 @@ def analyze_profile(
     
     # Format posts for prompt
     if posts:
-        posts_text = "\n".join(f"{i+1}. {p[:300]}" for i, p in enumerate(posts[:10]))
+        posts_text = "\n".join(f"{i+1}. {p[:300]}" for i, p in enumerate(posts[:5]))
     else:
         posts_text = "(No posts available - analyze handle and bio only)"
     
