@@ -35,7 +35,7 @@ class KOLEngine:
         """
         Scan all rows in the sheet:
         1. Extract links from Name column (column A)
-        2. Scrape profiles + 10 recent posts using Apify
+        2. Scrape profiles + 5 recent posts using Apify
         3. Analyze posts with AI to determine niche
         4. Save to database (cache)
         5. Write to sheet (ONLY columns B, D, I, J, N, O, P)
@@ -206,17 +206,18 @@ class KOLEngine:
         This is more cost-effective than /scanall when you've already
         scanned most rows and just need to fill in gaps.
         """
-        stats = {"scanned": 0, "updated": 0, "skipped": 0, "errors": 0}
+        stats = {"scanned": 0, "updated": 0, "skipped_complete": 0, "skipped_no_link": 0, "errors": 0}
         rows = self._sheets.get_all_rows()
         all_links = self._sheets.get_all_hyperlinks()
-        
-        # Filter to only incomplete rows
-        incomplete_rows = [(i, row) for i, row in enumerate(rows, start=1) 
+
+        # Filter to only incomplete rows and count already-complete ones
+        incomplete_rows = [(i, row) for i, row in enumerate(rows, start=1)
                           if self._is_row_incomplete(row)]
-        
+
         total_all = len(rows)
         total_incomplete = len(incomplete_rows)
-        
+        stats["skipped_complete"] = total_all - total_incomplete
+
         logger.info(f"[scan_incomplete] Found {total_incomplete} incomplete rows out of {total_all} total")
         
         if not incomplete_rows:
@@ -232,7 +233,7 @@ class KOLEngine:
             if not url:
                 logger.debug(f"[scan_incomplete] Row {row_num}: No link")
                 self._sheets.update_row_fields(row_num, {"link_status": "No Link"})
-                stats["skipped"] += 1
+                stats["skipped_no_link"] += 1
                 continue
                 
             try:
