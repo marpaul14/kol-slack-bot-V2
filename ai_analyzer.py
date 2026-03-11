@@ -18,6 +18,52 @@ import re
 
 logger = logging.getLogger(__name__)
 
+# ─────────────────────────────────────────────
+# Niche synonym map for semantic search expansion
+# ─────────────────────────────────────────────
+NICHE_SYNONYMS = {
+    "trading": ["trading", "trader", "technical analysis", "alpha calls", "market analysis",
+                "day trading", "chart analysis", "chart", "swing trading", "scalping",
+                "ta", "signals", "price action"],
+    "defi": ["defi", "decentralized finance", "yield", "liquidity", "swap", "lending",
+             "staking", "protocol", "farming", "amm", "dex"],
+    "nft": ["nft", "non-fungible", "mint", "collection", "pfp", "digital art",
+            "opensea", "nfts"],
+    "crypto": ["crypto", "cryptocurrency", "bitcoin", "btc", "ethereum", "eth",
+               "blockchain", "altcoin", "token", "web3", "hodl", "degen"],
+    "web3": ["web3", "dapp", "decentralized", "onchain", "on-chain", "blockchain"],
+    "gaming": ["gaming", "gamer", "esports", "game", "gamefi", "play to earn", "p2e",
+               "streamer", "twitch"],
+    "ai": ["ai", "artificial intelligence", "machine learning", "llm", "chatgpt",
+           "deep learning", "gpt", "neural"],
+    "finance": ["finance", "investing", "investment", "stock", "wealth", "portfolio",
+                "market", "economics", "financial"],
+    "beauty": ["beauty", "makeup", "skincare", "cosmetic", "cosmetics", "glam"],
+    "fashion": ["fashion", "style", "outfit", "ootd", "clothing", "designer"],
+    "fitness": ["fitness", "gym", "workout", "health", "muscle", "exercise", "training"],
+    "food": ["food", "cook", "cooking", "recipe", "restaurant", "chef", "foodie"],
+    "travel": ["travel", "nomad", "adventure", "trip", "destination", "tourism"],
+    "music": ["music", "song", "artist", "album", "spotify", "musician"],
+    "comedy": ["comedy", "funny", "joke", "humor", "meme", "memes"],
+    "education": ["education", "teaching", "tutorial", "learn", "course", "educational"],
+    "news": ["news", "breaking", "journalism", "reporter", "media", "headlines"],
+    "lifestyle": ["lifestyle", "daily", "vlog", "life", "routine"],
+    "sports": ["sports", "athlete", "football", "basketball", "soccer", "tennis"],
+}
+
+
+def expand_niche_terms(term: str) -> list:
+    """Expand a niche term into related search terms using the synonym map."""
+    key = term.lower().strip()
+    if key in NICHE_SYNONYMS:
+        return NICHE_SYNONYMS[key]
+    # Check if the term is a substring of any key
+    for canon, synonyms in NICHE_SYNONYMS.items():
+        if key in canon or canon in key:
+            return synonyms
+    return [key]
+
+
 # Initialize Anthropic client
 _client = None
 try:
@@ -212,11 +258,65 @@ def _fallback_analysis(handle: str, bio: str, posts: list) -> dict:
 def parse_find_query(query: str) -> dict:
     """
     Parse a /findkol query into structured filters.
-    This is lightweight - minimal AI usage.
+
+    Supports two syntaxes:
+    1. Key:value pairs: /findkol niche:Trading platform:X qt_rate:300-500
+    2. Free-text (legacy): /findkol defi philippines
+
+    Multi-word values use hyphens/underscores: niche:technical-analysis
     """
-    query_lower = query.lower()
-    result = {"niche": None, "platform": None, "language": None, "location": None}
-    
+    result = {
+        "niche": None, "niche_terms": None, "platform": None,
+        "language": None, "location": None,
+        "qt_rate": None, "tweet_rate": None,
+        "longform_rate": None, "article_rate": None, "followers": None,
+    }
+
+    # Key aliases -> canonical filter name
+    KEY_ALIASES = {
+        "niche": "niche", "platform": "platform",
+        "language": "language", "lang": "language",
+        "location": "location", "loc": "location", "country": "location",
+        "qt_rate": "qt_rate", "qt": "qt_rate",
+        "tweet_rate": "tweet_rate", "tweet": "tweet_rate",
+        "longform_rate": "longform_rate", "longform": "longform_rate",
+        "thread_rate": "longform_rate", "thread": "longform_rate",
+        "article_rate": "article_rate", "article": "article_rate",
+        "followers": "followers", "follower_count": "followers",
+    }
+
+    # Extract key:value pairs
+    kv_pairs = re.findall(r'(\w+):(\S+)', query)
+
+    if kv_pairs:
+        # Process key:value pairs
+        for key, value in kv_pairs:
+            canonical = KEY_ALIASES.get(key.lower())
+            if canonical:
+                # Replace hyphens/underscores with spaces for text filters
+                if canonical not in ("qt_rate", "tweet_rate", "longform_rate",
+                                     "article_rate", "followers"):
+                    value = value.replace("-", " ").replace("_", " ")
+                result[canonical] = value
+
+        # Process leftover free-text (after removing key:value pairs)
+        leftover = re.sub(r'\w+:\S+', '', query).strip()
+        if leftover:
+            _parse_freetext(leftover.lower(), result)
+    else:
+        # Pure free-text mode (backward compatibility)
+        _parse_freetext(query.lower(), result)
+
+    # Expand niche terms for semantic search
+    if result["niche"]:
+        result["niche_terms"] = expand_niche_terms(result["niche"])
+
+    logger.info(f"[AI] Parsed query '{query}' -> {result}")
+    return result
+
+
+def _parse_freetext(query_lower: str, result: dict) -> None:
+    """Parse free-text query using keyword matching (legacy support)."""
     # Detect platform
     if " x " in f" {query_lower} " or "twitter" in query_lower:
         result["platform"] = "X"
@@ -226,7 +326,7 @@ def parse_find_query(query: str) -> dict:
         result["platform"] = "YouTube"
     elif "instagram" in query_lower or " ig " in f" {query_lower} ":
         result["platform"] = "Instagram"
-    
+
     # Detect niches
     niche_keywords = {
         "crypto": "Crypto", "defi": "DeFi", "nft": "NFT", "web3": "Web3",
@@ -235,11 +335,12 @@ def parse_find_query(query: str) -> dict:
         "fitness": "Fitness", "travel": "Travel", "food": "Food",
         "finance": "Finance", "music": "Music", "comedy": "Comedy",
     }
-    for keyword, niche in niche_keywords.items():
-        if keyword in query_lower:
-            result["niche"] = niche
-            break
-    
+    if not result["niche"]:
+        for keyword, niche in niche_keywords.items():
+            if keyword in query_lower:
+                result["niche"] = niche
+                break
+
     # Detect locations
     locations = {
         "ph": "Philippines", "philippines": "Philippines", "filipino": "Philippines", "pinoy": "Philippines",
@@ -251,27 +352,26 @@ def parse_find_query(query: str) -> dict:
         "malaysia": "Malaysia", "my": "Malaysia",
         "thailand": "Thailand", "thai": "Thailand",
     }
-    for key, loc in locations.items():
-        if key in query_lower:
-            result["location"] = loc
-            break
-    
+    if not result["location"]:
+        for key, loc in locations.items():
+            if key in query_lower:
+                result["location"] = loc
+                break
+
     # Detect languages
     languages = {
         "english": "English", "tagalog": "Tagalog", "filipino": "Filipino",
         "spanish": "Spanish", "chinese": "Chinese", "japanese": "Japanese",
         "korean": "Korean", "indonesian": "Indonesian", "thai": "Thai",
     }
-    for key, lang in languages.items():
-        if key in query_lower:
-            result["language"] = lang
-            break
-    
+    if not result["language"]:
+        for key, lang in languages.items():
+            if key in query_lower:
+                result["language"] = lang
+                break
+
     # If no niche detected, use first word as potential niche
     if not result["niche"]:
-        words = query.split()
+        words = query_lower.split()
         if words:
             result["niche"] = words[0].capitalize()
-    
-    logger.info(f"[AI] Parsed query '{query}' -> {result}")
-    return result

@@ -140,33 +140,39 @@ class KOLEngine:
         logger.info(f"[scan_all] Complete: {stats}")
         return stats
 
-    def find_kol(self, query: str) -> list:
+    def find_kol(self, query: str) -> tuple:
         """
-        Find KOLs matching a query.
-        
+        Find KOLs matching a query. Returns (results, filters).
+
         COST EFFECTIVE: This ONLY queries the database!
         - No scraping
         - No AI calls (except lightweight query parsing)
         - Instant results
-        
+
         Users should run /scanall first to populate the database.
         """
         logger.info(f"[find_kol] Query: {query}")
-        
+
         # Parse query into filters
         filters = ai.parse_find_query(query)
         logger.info(f"[find_kol] Filters: {filters}")
-        
+
         # Search database ONLY (no scraping!)
         results = db.search_kols(
             niche=filters.get("niche"),
+            niche_terms=filters.get("niche_terms"),
             platform=filters.get("platform"),
             language=filters.get("language"),
             location=filters.get("location"),
+            qt_rate=filters.get("qt_rate"),
+            tweet_rate=filters.get("tweet_rate"),
+            longform_rate=filters.get("longform_rate"),
+            article_rate=filters.get("article_rate"),
+            followers=filters.get("followers"),
         )
-        
+
         logger.info(f"[find_kol] Found {len(results)} matches")
-        return results
+        return results, filters
 
     def get_status(self) -> dict:
         """Get cache statistics."""
