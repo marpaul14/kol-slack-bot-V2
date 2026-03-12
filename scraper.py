@@ -29,7 +29,7 @@ except ImportError:
 APIFY_TOKEN = os.environ.get("APIFY_API_KEY", "")
 
 # Apify Actor IDs
-TWITTER_ACTOR = "danek/twitter-profile-ppr"  # Pay-per-result profile scraper
+TWITTER_ACTOR = "apidojo/tweet-scraper"  # Returns tweets + author profile data
 TIKTOK_ACTOR = "clockworks/tiktok-scraper"
 YOUTUBE_ACTOR = "streamers/youtube-channel-scraper"
 INSTAGRAM_ACTOR = "apify/instagram-profile-scraper"
@@ -109,7 +109,7 @@ def scrape_profile(url: str) -> dict:
 
 
 def _scrape_x_apify(url: str) -> dict:
-    """Scrape X/Twitter profile using Apify danek/twitter-profile-ppr."""
+    """Scrape X/Twitter profile and recent tweets using Apify apidojo/tweet-scraper."""
     result = {"recent_posts": []}
     handle = _extract_x_handle(url)
     result["handle"] = handle
@@ -123,33 +123,43 @@ def _scrape_x_apify(url: str) -> dict:
     try:
         client = ApifyClient(APIFY_TOKEN)
 
-        # danek/twitter-profile-ppr input format — takes usernames
+        # apidojo/tweet-scraper input format — returns tweets with author metadata
         run_input = {
-            "usernames": [clean_handle],
+            "twitterHandles": [clean_handle],
+            "maxItems": MAX_POSTS,
+            "sort": "Latest",
         }
 
-        logger.info(f"[Scraper] Running Apify danek/twitter-profile-ppr for @{clean_handle}")
+        logger.info(f"[Scraper] Running Apify apidojo/tweet-scraper for @{clean_handle}")
         run = client.actor(TWITTER_ACTOR).call(run_input=run_input, timeout_secs=120)
 
         # Get results from dataset
         items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
 
         if items:
-            item = items[0]  # Profile scraper returns one item per username
-            logger.debug(f"[Scraper] Raw Apify response keys: {list(item.keys())}")
+            # Extract profile data from the first tweet's author metadata
+            first = items[0]
+            author = first.get("author", {})
+            logger.debug(f"[Scraper] Raw author keys: {list(author.keys())}")
 
-            # Extract profile data (try multiple field name conventions)
-            followers = (item.get("followersCount")
-                        or item.get("followers_count")
-                        or item.get("followers", 0))
+            # Follower count (try multiple field name conventions)
+            followers = (author.get("followers")
+                        or author.get("followersCount")
+                        or author.get("followers_count", 0))
             result["followers"] = _format_number(followers)
-            result["raw_bio"] = (item.get("description")
-                                or item.get("bio", ""))
-            result["location"] = item.get("location", "")
+            result["raw_bio"] = (author.get("description")
+                                or author.get("bio", ""))
+            result["location"] = author.get("location", "")
 
-            # danek/twitter-profile-ppr is profile-only — no recent posts
+            # Extract recent post texts for AI niche classification
+            for item in items[:MAX_POSTS]:
+                text = item.get("text", "")
+                if text and len(text) > 10:
+                    result["recent_posts"].append(text)
+
             result["link_status"] = "OK"
-            logger.info(f"[Scraper] Apify success: {result.get('followers', 'N/A')} followers")
+            logger.info(f"[Scraper] Apify success: {result.get('followers', 'N/A')} followers, "
+                        f"{len(result['recent_posts'])} posts")
         else:
             logger.warning(f"[Scraper] No data returned for @{clean_handle}")
             result["link_status"] = "Limited"
