@@ -25,18 +25,37 @@ logger = logging.getLogger(__name__)
 NICHE_SYNONYMS = {
     "trading": ["trading", "trader", "technical analysis", "alpha calls", "market analysis",
                 "day trading", "chart analysis", "chart", "swing trading", "scalping",
-                "ta", "signals", "price action"],
+                "ta", "signals", "price action", "altcoin", "altcoins", "token",
+                "hodl", "degen", "btc", "bitcoin", "memecoin", "memecoins",
+                "portfolio", "long", "short", "leverage"],
     "defi": ["defi", "decentralized finance", "yield", "liquidity", "swap", "lending",
-             "staking", "protocol", "farming", "amm", "dex"],
+             "staking", "protocol", "farming", "amm", "dex", "dapp", "decentralized",
+             "onchain", "on-chain", "tvl", "vault"],
     "nft": ["nft", "non-fungible", "mint", "collection", "pfp", "digital art",
             "opensea", "nfts"],
-    "crypto": ["crypto", "cryptocurrency", "bitcoin", "btc", "ethereum", "eth",
-               "blockchain", "altcoin", "token", "web3", "hodl", "degen"],
-    "web3": ["web3", "dapp", "decentralized", "onchain", "on-chain", "blockchain"],
+    "rwa": ["rwa", "real world assets", "tokenized assets", "tokenization",
+            "real estate", "commodities", "treasury", "bonds", "asset tokenization",
+            "physical assets", "securitization", "tokenized", "ondo", "centrifuge",
+            "maple"],
+    "depin": ["depin", "decentralized physical infrastructure", "dpin",
+              "iot", "helium", "hivemapper", "render", "wireless", "sensors",
+              "hardware", "physical infrastructure", "filecoin", "arweave",
+              "akash", "network infrastructure"],
+    "l1": ["l1", "layer 1", "layer one", "layer1", "ethereum", "solana",
+           "avalanche", "near", "sui", "aptos", "cosmos", "polkadot",
+           "cardano", "mainnet", "consensus", "blockchain", "validator",
+           "block production"],
+    "l2": ["l2", "layer 2", "layer two", "layer2", "rollup", "optimism",
+           "arbitrum", "zk-rollup", "zksync", "polygon", "base", "scaling",
+           "sidechain", "starknet", "scroll", "linea", "op stack",
+           "zero knowledge"],
     "gaming": ["gaming", "gamer", "esports", "game", "gamefi", "play to earn", "p2e",
                "streamer", "twitch"],
     "ai": ["ai", "artificial intelligence", "machine learning", "llm", "chatgpt",
-           "deep learning", "gpt", "neural"],
+           "deep learning", "gpt", "neural", "openai", "anthropic", "claude",
+           "generative ai", "gen ai", "ai agent", "ai agents", "transformer",
+           "diffusion", "midjourney", "stable diffusion", "computer vision",
+           "nlp", "natural language"],
     "finance": ["finance", "investing", "investment", "stock", "wealth", "portfolio",
                 "market", "economics", "financial"],
     "beauty": ["beauty", "makeup", "skincare", "cosmetic", "cosmetics", "glam"],
@@ -95,23 +114,27 @@ Based on the bio AND the posts above, return JSON with:
   Format: "Primary Niche | Subtopic1, Subtopic2, Subtopic3 | Content Style"
   
   Examples of good niche descriptions:
-  - "Trading | Alpha Calls, Market Analysis, Altcoins | Shilling"
-  - "DeFi | Trading, Web3 General, Stablecoins | Education"
-  - "NFT | Web3 General, GameFi, Solana | Shilling, Community"
-  - "Web3 General | News, Scandals/Drama, Memecoins | Commentary"
-  - "Trading & Portfolio Management | Web3 General, Risk Analysis | Education"
+  - "Trading | Alpha Calls, Market Analysis, Memecoins | Shilling"
+  - "DeFi | Stablecoins, Airdrops | Education"
+  - "NFT | GameFi, Solana | Shilling, Community"
+  - "L1 | Ethereum, Bitcoin, News | Commentary"
+  - "RWA | Tokenized Assets, Real Estate | Education"
+  - "DePIN | IoT, DePIN Networks | News"
+  - "Trading & Portfolio Management | Risk Analysis | Education"
   - "Gaming | Esports, Streaming, Game Reviews | Entertainment"
   - "Tech | AI, Startups, Programming | Education, News"
-  
-  Primary niches: Crypto, DeFi, NFT, Web3 General, Trading, Gaming, Tech, AI, Beauty, Fashion, Fitness, Travel, Food, Finance, Music, Comedy, Education, News, Lifestyle, Entertainment, Sports
-  
-  Subtopics to consider: Alpha Calls, Market Analysis, Altcoins, Memecoins, Stablecoins, GameFi, Solana, Ethereum, Bitcoin, Layer 1, Layer 2, Airdrops, Token Promotions, Community Building, Shilling, Education, News, Commentary, Drama/Scandals, Portfolio Management, Risk Analysis, Long-term Investing, Day Trading
+
+  Primary niches: DeFi, NFT, Trading, Gaming, Tech, AI, RWA, DePIN, L1, L2, Beauty, Fashion, Fitness, Travel, Food, Finance, Music, Comedy, Education, News, Lifestyle, Entertainment, Sports
+
+  Subtopics to consider: Alpha Calls, Market Analysis, Memecoins, Stablecoins, GameFi, Solana, Ethereum, Bitcoin, Airdrops, Token Promotions, Community Building, Shilling, Education, News, Commentary, Drama/Scandals, Portfolio Management, Risk Analysis, Long-term Investing, Day Trading, Tokenized Assets, Real Estate, DePIN Networks, IoT, Rollups, ZK
+
+  IMPORTANT: If you cannot determine the niche from the bio and posts, or if insufficient data is available, use "no data available" as the niche value. Do NOT use "Other", "Unknown", "Crypto", "Web3", "Blockchain", or "Altcoins" as a niche.
 
 - language: string — primary language of the posts (English, Filipino, Spanish, etc.)
 
 - location: string — location if mentioned or inferred (or empty string if unknown)
 
-Return ONLY valid JSON like: {{"niche": "DeFi | Trading, Web3 General, Stablecoins | Education", "language": "English", "location": "Philippines"}}"""
+Return ONLY valid JSON like: {{"niche": "DeFi | Trading, Stablecoins | Education", "language": "English", "location": "Philippines"}}"""
 
 
 def analyze_profile(
@@ -202,27 +225,33 @@ def _fallback_analysis(handle: str, bio: str, posts: list) -> dict:
     combined = f"{handle_lower} {bio_lower} {posts_text}"
     
     # Keyword-based niche detection (ordered by priority)
-    niche = "Other"
-    
-    # Crypto-related
+    niche = "no data available"
+
+    # Crypto/blockchain-related (route to specific categories)
     crypto_keywords = [
-        "crypto", "defi", "web3", "nft", "eth", "btc", "bitcoin", "ethereum",
-        "solana", "altcoin", "trading", "hodl", "airdrop", "degen", "gm", 
-        "wagmi", "blockchain", "token", "chain", "wallet", "mint"
+        "defi", "nft", "eth", "btc", "bitcoin", "ethereum",
+        "solana", "trading", "hodl", "airdrop", "degen",
+        "token", "chain", "wallet", "mint", "l1", "l2",
+        "layer", "rollup", "rwa", "depin"
     ]
     if any(kw in combined for kw in crypto_keywords):
-        # More specific crypto niches
-        if any(kw in combined for kw in ["defi", "yield", "swap", "liquidity"]):
+        if any(kw in combined for kw in ["defi", "yield", "swap", "liquidity", "staking", "farming"]):
             niche = "DeFi"
         elif any(kw in combined for kw in ["nft", "mint", "collection", "pfp"]):
             niche = "NFT"
-        elif any(kw in combined for kw in ["web3", "dapp"]):
-            niche = "Web3"
-        elif any(kw in combined for kw in ["trading", "chart", "ta ", "technical"]):
+        elif any(kw in combined for kw in ["rwa", "real world asset", "tokenized asset", "real estate", "bonds", "treasury"]):
+            niche = "RWA"
+        elif any(kw in combined for kw in ["depin", "physical infrastructure", "iot", "helium", "hivemapper"]):
+            niche = "DePIN"
+        elif any(kw in combined for kw in ["l2", "layer 2", "rollup", "optimism", "arbitrum", "zksync", "polygon"]):
+            niche = "L2"
+        elif any(kw in combined for kw in ["l1", "layer 1", "ethereum", "solana", "avalanche", "sui", "aptos", "blockchain", "validator"]):
+            niche = "L1"
+        elif any(kw in combined for kw in ["trading", "chart", "ta ", "technical", "alpha", "signal"]):
             niche = "Trading"
         else:
-            niche = "Crypto"
-    
+            niche = "DeFi"
+
     # Other niches
     elif any(kw in combined for kw in ["game", "gaming", "esport", "stream", "twitch", "gamer"]):
         niche = "Gaming"
@@ -351,11 +380,12 @@ def _parse_freetext(query_lower: str, result: dict) -> None:
 
     # Detect niches
     niche_keywords = {
-        "crypto": "Crypto", "defi": "DeFi", "nft": "NFT", "web3": "Web3",
-        "bitcoin": "Bitcoin", "trading": "Trading", "gaming": "Gaming",
-        "tech": "Tech", "ai": "AI", "beauty": "Beauty", "fashion": "Fashion",
-        "fitness": "Fitness", "travel": "Travel", "food": "Food",
-        "finance": "Finance", "music": "Music", "comedy": "Comedy",
+        "defi": "DeFi", "nft": "NFT", "trading": "Trading",
+        "rwa": "RWA", "depin": "DePIN", "l1": "L1", "l2": "L2",
+        "gaming": "Gaming", "tech": "Tech", "ai": "AI",
+        "beauty": "Beauty", "fashion": "Fashion", "fitness": "Fitness",
+        "travel": "Travel", "food": "Food", "finance": "Finance",
+        "music": "Music", "comedy": "Comedy",
     }
     if not result["niche"]:
         for keyword, niche in niche_keywords.items():
