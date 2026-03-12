@@ -29,7 +29,7 @@ except ImportError:
 APIFY_TOKEN = os.environ.get("APIFY_API_KEY", "")
 
 # Apify Actor IDs
-TWITTER_ACTOR = "danek/twitter-profile-ppr"  # Pay-per-result profile scraper
+TWITTER_ACTOR = "apidojo/tweet-scraper"  # Tweet Scraper V2 — tweets + embedded author profile
 TIKTOK_ACTOR = "clockworks/tiktok-scraper"
 YOUTUBE_ACTOR = "streamers/youtube-channel-scraper"
 INSTAGRAM_ACTOR = "apify/instagram-profile-scraper"
@@ -109,7 +109,13 @@ def scrape_profile(url: str) -> dict:
 
 
 def _scrape_x_apify(url: str) -> dict:
-    """Scrape X/Twitter profile using Apify danek/twitter-profile-ppr."""
+    """Scrape X/Twitter profile + recent tweets via Apify apidojo/tweet-scraper.
+
+    The actor returns tweet-level items, each containing the tweet text and
+    an embedded author object with profile data (followers, bio, location).
+    We extract profile info from the first item's author object and collect
+    up to MAX_POSTS recent tweet texts.
+    """
     result = {"recent_posts": []}
     handle = _extract_x_handle(url)
     result["handle"] = handle
@@ -123,33 +129,65 @@ def _scrape_x_apify(url: str) -> dict:
     try:
         client = ApifyClient(APIFY_TOKEN)
 
-        # danek/twitter-profile-ppr input format — takes usernames
+        # apidojo/tweet-scraper input — fetch tweets by author
         run_input = {
-            "usernames": [clean_handle],
+            "author": clean_handle,
+            "maxItems": MAX_POSTS,
         }
 
-        logger.info(f"[Scraper] Running Apify danek/twitter-profile-ppr for @{clean_handle}")
+        logger.info(f"[Scraper] Running Apify apidojo/tweet-scraper for @{clean_handle}")
         run = client.actor(TWITTER_ACTOR).call(run_input=run_input, timeout_secs=120)
 
         # Get results from dataset
         items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
 
         if items:
-            item = items[0]  # Profile scraper returns one item per username
-            logger.debug(f"[Scraper] Raw Apify response keys: {list(item.keys())}")
+            logger.debug(f"[Scraper] Raw Apify response keys: {list(items[0].keys())}")
 
-            # Extract profile data (try multiple field name conventions)
-            followers = (item.get("followersCount")
-                        or item.get("followers_count")
-                        or item.get("followers", 0))
-            result["followers"] = _format_number(followers)
-            result["raw_bio"] = (item.get("description")
-                                or item.get("bio", ""))
-            result["location"] = item.get("location", "")
+            # --- Extract profile data from the first item's author object ---
+            first = items[0]
+            author = (first.get("author")
+                      or first.get("user")
+                      or first.get("userInfo")
+                      or {})
 
-            # danek/twitter-profile-ppr is profile-only — no recent posts
+            if isinstance(author, dict):
+                followers = (author.get("followersCount")
+                             or author.get("followers_count")
+                             or author.get("followers")
+                             or author.get("followerCount")
+                             or 0)
+                result["followers"] = _format_number(followers)
+                result["raw_bio"] = (author.get("description")
+                                     or author.get("bio")
+                                     or author.get("biography")
+                                     or "")
+                result["location"] = (author.get("location") or "")
+            else:
+                # Fallback: profile fields may be at the top level
+                followers = (first.get("followersCount")
+                             or first.get("followers_count")
+                             or first.get("followers")
+                             or 0)
+                result["followers"] = _format_number(followers)
+                result["raw_bio"] = (first.get("description")
+                                     or first.get("bio")
+                                     or "")
+                result["location"] = first.get("location", "")
+
+            # --- Extract recent post texts from all tweet items ---
+            for item in items:
+                text = (item.get("text")
+                        or item.get("full_text")
+                        or item.get("tweetText")
+                        or item.get("content")
+                        or "")
+                if text and len(text) > 10 and len(result["recent_posts"]) < MAX_POSTS:
+                    result["recent_posts"].append(text)
+
             result["link_status"] = "OK"
-            logger.info(f"[Scraper] Apify success: {result.get('followers', 'N/A')} followers")
+            logger.info(f"[Scraper] Apify success: {result.get('followers', 'N/A')} followers, "
+                        f"{len(result['recent_posts'])} posts")
         else:
             logger.warning(f"[Scraper] No data returned for @{clean_handle}")
             result["link_status"] = "Limited"
