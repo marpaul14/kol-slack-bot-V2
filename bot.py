@@ -4,7 +4,7 @@ KOL Slack Bot — Main entry point
 Commands:
 - /scanall: Scrapes all KOLs using Apify, analyzes 5 posts each, caches results
 - /scannew: Only scans rows missing Handle, Language, Location, or Niche (cost-effective!)
-- /findkol <query>: Searches cached database (no scraping = cost effective!)
+- /findkol <query>: Searches the sheet directly (no scraping = cost effective!)
 - /kolstatus: Shows cache statistics
 """
 
@@ -72,7 +72,7 @@ def handle_scanall(ack, say, command, client):
                     f"• Scanned: {result['scanned']}\n"
                     f"• Updated: {result['updated']}\n"
                     f"• Errors: {result['errors']}\n\n"
-                    f"_Use `/findkol <niche>` to search the database._"
+                    f"_Use `/findkol <niche>` to search._"
                 ),
             )
         except Exception as e:
@@ -123,7 +123,7 @@ def handle_scannew(ack, say, command, client):
                     f"• Skipped (already complete): {result.get('skipped_complete', 0)}\n"
                     f"• Skipped (no link): {result.get('skipped_no_link', 0)}\n"
                     f"• Errors: {result['errors']}\n\n"
-                    f"_Use `/findkol <niche>` to search the database._"
+                    f"_Use `/findkol <niche>` to search._"
                 ),
             )
         except Exception as e:
@@ -159,7 +159,7 @@ def handle_findkol(ack, say, command, client):
             "*Free-text also works:*\n"
             "• `/findkol crypto` — Find crypto KOLs\n"
             "• `/findkol defi philippines` — DeFi KOLs from PH\n\n"
-            "_💡 Run `/scanall` first to populate the database._"
+            "_💡 Run `/scanall` first to populate the sheet._"
         )
         return
 
@@ -206,9 +206,9 @@ def handle_status(ack, say, command, client):
     stats = engine.get_status()
     
     send_private(client, channel, user,
-        f"📊 *KOL Database Status*\n"
-        f"• Total rows in sheet: {stats['total_rows']}\n"
-        f"• Scanned & cached: {stats['cached']}\n"
+        f"📊 *KOL Sheet Status*\n"
+        f"• Total rows: {stats['total_rows']}\n"
+        f"• Scanned: {stats['scanned']}\n"
         f"• Not yet scanned: {stats['unscanned']}\n"
         f"• Incomplete (missing Handle/Language/Location/Niche): {stats.get('incomplete', 'N/A')}\n"
         f"• Last scan: {stats['last_scan'] or 'Never'}\n\n"
