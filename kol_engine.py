@@ -3,7 +3,7 @@ kol_engine.py — Orchestrates scan_all and find_kol operations.
 
 COLUMN BEHAVIOR:
   - Bot ONLY writes to: B (Handle), D (Followers), I (Language), J (Location), N (Niche), O (Last Scanned), P (Link Status)
-  - Bot NEVER modifies: A (Name), C (Platform), E-H (Rates), K-M (Tags/Contact/Notes)
+  - Bot NEVER modifies: A (Name), C (Platform), E-H (Rates), K-M (Tags/Contact/Notes), Q (Cookie3 Score), R (Smart Followers)
 
 DATA SOURCE:
   - The Google Sheet is the single source of truth.
@@ -132,6 +132,8 @@ def _search_rows(rows: list, filters: dict) -> list:
         "longform": filters.get("longform_rate"),
         "article": filters.get("article_rate"),
         "followers": filters.get("followers"),
+        "cookie3_score": filters.get("cookie3_score"),
+        "smart_followers": filters.get("smart_followers"),
     }
 
     for col, filter_val in rate_filters.items():

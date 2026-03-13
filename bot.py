@@ -193,7 +193,8 @@ def handle_findkol(ack, say, command, client):
             "• `/findkol niche:Gaming tweet:>200` — Gaming KOLs with tweet rate above $200\n"
             "• `/findkol niche:NFT followers:>10000` — NFT KOLs with 10k+ followers\n\n"
             "*Available filters:* `niche`, `platform`, `language` (or `lang`), `location` (or `loc`), "
-            "`qt` (or `qt_rate`), `tweet` (or `tweet_rate`), `longform` (or `thread`), `article`, `followers`\n\n"
+            "`qt` (or `qt_rate`), `tweet` (or `tweet_rate`), `longform` (or `thread`), `article`, `followers`, "
+            "`cookie3` (or `c3`), `smart` (or `sf`)\n\n"
             "*Rate formats:* `300` (exact), `300-500` (range), `>300` (min), `<500` (max)\n\n"
             "*Free-text also works:*\n"
             "• `/findkol crypto` — Find crypto KOLs\n"
@@ -218,9 +219,11 @@ def handle_findkol(ack, say, command, client):
             # Show rates in output when rate filters are active
             show_rates = any(filters.get(k) for k in
                             ("qt_rate", "tweet_rate", "longform_rate", "article_rate"))
+            show_scores = any(filters.get(k) for k in
+                             ("cookie3_score", "smart_followers"))
 
             # Format as compact code blocks (splits if >30 results)
-            messages = _format_kol_results(results, query, show_rates=show_rates)
+            messages = _format_kol_results(results, query, show_rates=show_rates, show_scores=show_scores)
             for msg in messages:
                 client.chat_postMessage(channel=channel, text=msg)
 
@@ -264,11 +267,12 @@ def handle_status(ack, say, command, client):
 # ─────────────────────────────────────────────
 MAX_RESULTS_PER_MESSAGE = 30  # Slack message limit ~4000 chars
 
-def _format_kol_results(results: list, query: str, page: int = 1, show_rates: bool = False) -> list:
+def _format_kol_results(results: list, query: str, page: int = 1, show_rates: bool = False, show_scores: bool = False) -> list:
     """
     Format KOL results as compact code blocks.
     Returns a list of messages (splits if too many results).
     When show_rates=True, includes QT/Tweet/Thread/Article rate columns.
+    When show_scores=True, includes Cookie3 Score/Smart Followers columns.
     """
     if not results:
         return [f"😕 No KOLs found matching: *{query}*"]
@@ -293,18 +297,25 @@ def _format_kol_results(results: list, query: str, page: int = 1, show_rates: bo
             lines.append("")
 
         lines.append("```")
+        score_suffix = f" {'C3':<6} {'Smart':<8}" if show_scores else ""
         if show_rates:
             lines.append(
                 f"{'Name':<18} {'Handle':<16} {'Niche':<30} "
                 f"{'QT':<8} {'Tweet':<8} {'Thread':<8} {'Article':<8} "
-                f"{'Lang':<7} {'Loc':<10}"
+                f"{'Lang':<7} {'Loc':<10}" + score_suffix
             )
-            lines.append("-" * 125)
+            lines.append("-" * (125 + (16 if show_scores else 0)))
         else:
-            lines.append(f"{'Name':<20} {'Handle':<18} {'Niche':<40} {'Lang':<8} {'Loc':<12}")
-            lines.append("-" * 100)
+            lines.append(f"{'Name':<20} {'Handle':<18} {'Niche':<40} {'Lang':<8} {'Loc':<12}" + score_suffix)
+            lines.append("-" * (100 + (16 if show_scores else 0)))
 
         for kol in chunk:
+            score_vals = ""
+            if show_scores:
+                c3 = (kol.get("cookie3_score") or "-")[:5]
+                smart = (kol.get("smart_followers") or "-")[:7]
+                score_vals = f" {c3:<6} {smart:<8}"
+
             if show_rates:
                 name = (kol.get("name") or "N/A")[:17]
                 handle = (kol.get("handle") or "N/A")[:15]
@@ -319,7 +330,7 @@ def _format_kol_results(results: list, query: str, page: int = 1, show_rates: bo
                 lines.append(
                     f"{name:<18} {handle:<16} {niche:<30} "
                     f"{qt:<8} {tweet:<8} {longform:<8} {article:<8} "
-                    f"{lang:<7} {location:<10}"
+                    f"{lang:<7} {location:<10}" + score_vals
                 )
             else:
                 name = (kol.get("name") or "N/A")[:19]
@@ -328,7 +339,7 @@ def _format_kol_results(results: list, query: str, page: int = 1, show_rates: bo
                 lang = (kol.get("language") or "N/A")[:7]
                 location = (kol.get("location") or "N/A")[:11]
 
-                lines.append(f"{name:<20} {handle:<18} {niche:<40} {lang:<8} {location:<12}")
+                lines.append(f"{name:<20} {handle:<18} {niche:<40} {lang:<8} {location:<12}" + score_vals)
 
         lines.append("```")
 

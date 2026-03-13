@@ -4,10 +4,10 @@ sheets.py — Google Sheets read/write layer.
 Column layout:
   A=Name  B=Handle  C=Platform  D=Followers  E=QT  F=Tweet  G=Longform
   H=Article  I=Language  J=Location  K=Tags  L=Contact  M=Notes
-  N=Niche  O=Last Scanned  P=Link Status
+  N=Niche  O=Last Scanned  P=Link Status  Q=Cookie3 Score  R=Smart Followers
 
 COLUMN PERMISSIONS:
-  READ-ONLY (never modify): A, C, E, F, G, H, K, L, M
+  READ-ONLY (never modify): A, C, E, F, G, H, K, L, M, Q, R
   BOT WRITES: B, D, I, J, N, O, P
 """
 
@@ -39,9 +39,11 @@ COL = {
     "tags":         10,  # K - READ-ONLY
     "contact":      11,  # L - READ-ONLY
     "notes":        12,  # M - READ-ONLY
-    "niche":        13,  # N - Bot writes
-    "last_scanned": 14,  # O - Bot writes
-    "link_status":  15,  # P - Bot writes
+    "niche":           13,  # N - Bot writes
+    "last_scanned":    14,  # O - Bot writes
+    "link_status":     15,  # P - Bot writes
+    "cookie3_score":   16,  # Q - READ-ONLY
+    "smart_followers": 17,  # R - READ-ONLY
 }
 
 # Columns the bot is ALLOWED to write to
@@ -52,6 +54,7 @@ HEADERS = [
     "QT", "Tweet", "Longform", "Article",
     "Language", "Location", "Tags", "Contact",
     "Notes", "Niche", "Last Scanned", "Link Status",
+    "Cookie3 Score", "Smart Followers",
 ]
 
 NUM_COLS = len(HEADERS)
@@ -95,14 +98,14 @@ class SheetsClient:
 
     def ensure_headers(self) -> None:
         """Make sure the header row exists."""
-        values = self._get(f"{self._range_prefix}A1:P1")
+        values = self._get(f"{self._range_prefix}A1:R1")
         if not values or values[0] != HEADERS:
-            self._update(f"{self._range_prefix}A1:P1", [HEADERS])
+            self._update(f"{self._range_prefix}A1:R1", [HEADERS])
             logger.info("[Sheets] Headers written/updated.")
 
     def get_all_rows(self) -> list:
         """Fetch all data rows (excluding header)."""
-        values = self._get(f"{self._range_prefix}A1:P")
+        values = self._get(f"{self._range_prefix}A1:R")
         if not values:
             return []
         rows = []

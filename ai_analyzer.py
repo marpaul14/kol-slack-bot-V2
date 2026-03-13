@@ -316,6 +316,7 @@ def parse_find_query(query: str) -> dict:
         "language": None, "location": None,
         "qt_rate": None, "tweet_rate": None,
         "longform_rate": None, "article_rate": None, "followers": None,
+        "cookie3_score": None, "smart_followers": None,
     }
 
     # Key aliases -> canonical filter name
@@ -329,6 +330,8 @@ def parse_find_query(query: str) -> dict:
         "thread_rate": "longform_rate", "thread": "longform_rate",
         "article_rate": "article_rate", "article": "article_rate",
         "followers": "followers", "follower_count": "followers",
+        "cookie3_score": "cookie3_score", "cookie3": "cookie3_score", "c3": "cookie3_score",
+        "smart_followers": "smart_followers", "smart": "smart_followers", "sf": "smart_followers",
     }
 
     # Extract key:value pairs (allows optional space after colon, supports quoted values)
@@ -343,7 +346,8 @@ def parse_find_query(query: str) -> dict:
             if canonical:
                 # Replace hyphens/underscores with spaces for text filters
                 if canonical not in ("qt_rate", "tweet_rate", "longform_rate",
-                                     "article_rate", "followers"):
+                                     "article_rate", "followers",
+                                     "cookie3_score", "smart_followers"):
                     value = value.replace("-", " ").replace("_", " ")
                 # Expand location aliases (e.g. USA -> United States)
                 if canonical == "location":

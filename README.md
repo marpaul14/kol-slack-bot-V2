@@ -42,6 +42,8 @@ A Slack bot that automates Key Opinion Leader (KOL) roster management. It scrape
 | `longform` | `thread` | `longform:<1000` |
 | `article` | — | `article:500` |
 | `followers` | — | `followers:>10000` |
+| `cookie3` | `c3`, `cookie3_score` | `cookie3:>500` |
+| `smart` | `sf`, `smart_followers` | `smart:>1000` |
 
 **Rate/numeric formats:** `300` (exact), `300-500` (range), `>300` (minimum), `<500` (maximum)
 
@@ -72,8 +74,10 @@ A Slack bot that automates Key Opinion Leader (KOL) roster management. It scrape
 | N | Niche | Bot (AI-detected) |
 | O | Last Scanned | Bot (UTC timestamp) |
 | P | Link Status | Bot (OK / Limited / Error / No Link / Timeout) |
+| Q | Cookie3 Score | User |
+| R | Smart Followers | User |
 
-The bot **only writes** to columns B, D, I, J, N, O, and P. It **never modifies** user-managed columns (A, C, E–H, K–M).
+The bot **only writes** to columns B, D, I, J, N, O, and P. It **never modifies** user-managed columns (A, C, E–H, K–M, Q–R).
 
 ## Architecture
 
