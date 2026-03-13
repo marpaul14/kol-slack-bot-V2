@@ -21,8 +21,41 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
+# Channel-based access control: comma-separated channel IDs (e.g. "C01ABC,C02DEF")
+# If not set, all channels are allowed (no restriction).
+ALLOWED_CHANNEL_IDS = {
+    cid.strip()
+    for cid in os.environ.get("ALLOWED_CHANNEL_IDS", "").split(",")
+    if cid.strip()
+}
+
+if ALLOWED_CHANNEL_IDS:
+    logger.info(f"Access control enabled — allowed channels: {ALLOWED_CHANNEL_IDS}")
+else:
+    logger.warning("ALLOWED_CHANNEL_IDS not set — bot commands are accessible from ALL channels")
+
 app = App(token=os.environ["SLACK_BOT_TOKEN"])
 engine = KOLEngine()
+
+
+def check_channel_access(command, client) -> bool:
+    """Return True if the command is allowed in this channel, False otherwise."""
+    if not ALLOWED_CHANNEL_IDS:
+        return True
+    channel = command["channel_id"]
+    if channel in ALLOWED_CHANNEL_IDS:
+        return True
+    user = command["user_id"]
+    logger.warning(f"Access denied: user {user} tried command in channel {channel}")
+    try:
+        client.chat_postEphemeral(
+            channel=channel,
+            user=user,
+            text="⛔ This command is not available in this channel.",
+        )
+    except Exception:
+        pass
+    return False
 
 
 def send_private(client, channel: str, user: str, text: str):
@@ -39,6 +72,8 @@ def send_private(client, channel: str, user: str, text: str):
 @app.command("/scanall")
 def handle_scanall(ack, say, command, client):
     ack()
+    if not check_channel_access(command, client):
+        return
     channel = command["channel_id"]
     user = command["user_id"]
 
@@ -88,6 +123,8 @@ def handle_scanall(ack, say, command, client):
 @app.command("/scannew")
 def handle_scannew(ack, say, command, client):
     ack()
+    if not check_channel_access(command, client):
+        return
     channel = command["channel_id"]
     user = command["user_id"]
 
@@ -139,6 +176,8 @@ def handle_scannew(ack, say, command, client):
 @app.command("/findkol")
 def handle_findkol(ack, say, command, client):
     ack()
+    if not check_channel_access(command, client):
+        return
     channel = command["channel_id"]
     user = command["user_id"]
     query = command.get("text", "").strip()
@@ -198,9 +237,11 @@ def handle_findkol(ack, say, command, client):
 @app.command("/kolstatus")
 def handle_status(ack, say, command, client):
     ack()
+    if not check_channel_access(command, client):
+        return
     channel = command["channel_id"]
     user = command["user_id"]
-    
+
     logger.info(f"[/kolstatus] Requested by {user}")
     
     stats = engine.get_status()
