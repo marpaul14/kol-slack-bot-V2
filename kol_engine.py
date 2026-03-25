@@ -121,7 +121,12 @@ def _search_rows(rows: list, filters: dict) -> list:
         lang_lower = filters["language"].lower()
         results = [r for r in results if lang_lower in (r.get("language") or "").lower()]
 
-    if filters.get("location"):
+    if filters.get("location_list"):
+        loc_list = filters["location_list"]
+        results = [r for r in results if any(
+            country in (r.get("location") or "").lower() for country in loc_list
+        )]
+    elif filters.get("location"):
         loc_lower = filters["location"].lower()
         results = [r for r in results if loc_lower in (r.get("location") or "").lower()]
 
