@@ -195,8 +195,8 @@ def handle_findkol(ack, say, command, client):
             "• `/findkol niche:NFT followers:>10000` — NFT KOLs with 10k+ followers\n\n"
             "*Regions:* `LATAM`, `APAC`, `EMEA`, `NA`, `SEA`, `MENA`, `Europe`, `Africa`\n\n"
             "*Available filters:* `niche`, `platform`, `language` (or `lang`), `location` (or `loc`), "
-            "`qt` (or `qt_rate`), `tweet` (or `tweet_rate`), `longform` (or `thread`), `article`, `followers`, "
-            "`cookie3` (or `c3`), `smart` (or `sf`)\n\n"
+            "`qt` (or `qt_rate`), `tweet` (or `tweet_rate`), `longform` (or `thread`), `article`, `video` (or `video_rate`), "
+            "`followers`, `cookie3` (or `c3`), `smart` (or `sf`)\n\n"
             "*Rate formats:* `300` (exact), `300-500` (range), `>300` (min), `<500` (max)\n\n"
             "*Free-text also works:*\n"
             "• `/findkol crypto` — Find crypto KOLs\n"
@@ -220,7 +220,7 @@ def handle_findkol(ack, say, command, client):
 
             # Show rates in output when rate filters are active
             show_rates = any(filters.get(k) for k in
-                            ("qt_rate", "tweet_rate", "longform_rate", "article_rate"))
+                            ("qt_rate", "tweet_rate", "longform_rate", "article_rate", "video_rate"))
             show_scores = any(filters.get(k) for k in
                              ("cookie3_score", "smart_followers"))
 
@@ -303,10 +303,10 @@ def _format_kol_results(results: list, query: str, page: int = 1, show_rates: bo
         if show_rates:
             lines.append(
                 f"{'Name':<18} {'Handle':<16} {'Niche':<30} "
-                f"{'QT':<8} {'Tweet':<8} {'Thread':<8} {'Article':<8} "
+                f"{'QT':<8} {'Tweet':<8} {'Thread':<8} {'Article':<8} {'Video':<8} "
                 f"{'Lang':<7} {'Loc':<10}" + score_suffix
             )
-            lines.append("-" * (125 + (16 if show_scores else 0)))
+            lines.append("-" * (134 + (16 if show_scores else 0)))
         else:
             lines.append(f"{'Name':<20} {'Handle':<18} {'Niche':<40} {'Lang':<8} {'Loc':<12}" + score_suffix)
             lines.append("-" * (100 + (16 if show_scores else 0)))
@@ -326,12 +326,13 @@ def _format_kol_results(results: list, query: str, page: int = 1, show_rates: bo
                 tweet = (kol.get("tweet") or "-")[:7]
                 longform = (kol.get("longform") or "-")[:7]
                 article = (kol.get("article") or "-")[:7]
+                video = (kol.get("video") or "-")[:7]
                 lang = (kol.get("language") or "N/A")[:6]
                 location = (kol.get("location") or "N/A")[:9]
 
                 lines.append(
                     f"{name:<18} {handle:<16} {niche:<30} "
-                    f"{qt:<8} {tweet:<8} {longform:<8} {article:<8} "
+                    f"{qt:<8} {tweet:<8} {longform:<8} {article:<8} {video:<8} "
                     f"{lang:<7} {location:<10}" + score_vals
                 )
             else:

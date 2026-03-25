@@ -2,8 +2,8 @@
 kol_engine.py — Orchestrates scan_all and find_kol operations.
 
 COLUMN BEHAVIOR:
-  - Bot ONLY writes to: B (Handle), D (Followers), I (Language), J (Location), N (Niche), O (Last Scanned), P (Link Status)
-  - Bot NEVER modifies: A (Name), C (Platform), E-H (Rates), K-M (Tags/Contact/Notes), Q (Cookie3 Score), R (Smart Followers)
+  - Bot ONLY writes to: B (Handle), D (Followers), J (Language), K (Location), O (Niche), P (Last Scanned), Q (Link Status)
+  - Bot NEVER modifies: A (Name), C (Platform), E-I (Rates), L-N (Tags/Contact/Notes), R (Cookie3 Score), S (Smart Followers)
 
 DATA SOURCE:
   - The Google Sheet is the single source of truth.
@@ -123,6 +123,7 @@ def _search_rows(rows: list, filters: dict) -> list:
 
     if filters.get("location_list"):
         loc_list = filters["location_list"]
+        logger.info(f"[find_kol] Region search: {filters.get('location_region')} ({len(loc_list)} countries)")
         results = [r for r in results if any(
             country in (r.get("location") or "").lower() for country in loc_list
         )]
@@ -136,6 +137,7 @@ def _search_rows(rows: list, filters: dict) -> list:
         "tweet": filters.get("tweet_rate"),
         "longform": filters.get("longform_rate"),
         "article": filters.get("article_rate"),
+        "video": filters.get("video_rate"),
         "followers": filters.get("followers"),
         "cookie3_score": filters.get("cookie3_score"),
         "smart_followers": filters.get("smart_followers"),
