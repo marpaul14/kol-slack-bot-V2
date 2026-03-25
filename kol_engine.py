@@ -123,6 +123,7 @@ def _search_rows(rows: list, filters: dict) -> list:
 
     if filters.get("location_list"):
         loc_list = filters["location_list"]
+        logger.info(f"[find_kol] Region search: {filters.get('location_region')} ({len(loc_list)} countries)")
         results = [r for r in results if any(
             country in (r.get("location") or "").lower() for country in loc_list
         )]
