@@ -344,7 +344,7 @@ def parse_find_query(query: str) -> dict:
         "language": None, "location": None,
         "location_list": None, "location_region": None,
         "qt_rate": None, "tweet_rate": None,
-        "longform_rate": None, "article_rate": None, "followers": None,
+        "longform_rate": None, "article_rate": None, "video_rate": None, "followers": None,
         "cookie3_score": None, "smart_followers": None,
     }
 
@@ -358,6 +358,7 @@ def parse_find_query(query: str) -> dict:
         "longform_rate": "longform_rate", "longform": "longform_rate",
         "thread_rate": "longform_rate", "thread": "longform_rate",
         "article_rate": "article_rate", "article": "article_rate",
+        "video_rate": "video_rate", "video": "video_rate",
         "followers": "followers", "follower_count": "followers",
         "cookie3_score": "cookie3_score", "cookie3": "cookie3_score", "c3": "cookie3_score",
         "smart_followers": "smart_followers", "smart": "smart_followers", "sf": "smart_followers",
@@ -375,7 +376,7 @@ def parse_find_query(query: str) -> dict:
             if canonical:
                 # Replace hyphens/underscores with spaces for text filters
                 if canonical not in ("qt_rate", "tweet_rate", "longform_rate",
-                                     "article_rate", "followers",
+                                     "article_rate", "video_rate", "followers",
                                      "cookie3_score", "smart_followers"):
                     value = value.replace("-", " ").replace("_", " ")
                 # Expand location: check regions first, then aliases
