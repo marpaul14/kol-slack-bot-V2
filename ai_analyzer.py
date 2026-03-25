@@ -297,6 +297,34 @@ LOCATION_ALIASES = {
     "thailand": "Thailand", "thai": "Thailand",
 }
 
+# Region-to-countries mapping for region-based location search
+REGION_COUNTRIES = {
+    "latam": ["brazil", "mexico", "argentina", "colombia", "chile", "peru", "venezuela",
+              "ecuador", "guatemala", "cuba", "bolivia", "dominican republic", "honduras",
+              "paraguay", "el salvador", "nicaragua", "costa rica", "panama", "uruguay", "puerto rico"],
+    "apac": ["china", "japan", "korea", "india", "australia", "indonesia", "philippines",
+             "vietnam", "thailand", "malaysia", "singapore", "taiwan", "hong kong",
+             "new zealand", "bangladesh", "pakistan", "myanmar", "cambodia", "sri lanka", "nepal"],
+    "emea": ["united kingdom", "germany", "france", "italy", "spain", "netherlands", "sweden",
+             "norway", "denmark", "finland", "poland", "turkey", "saudi arabia", "uae",
+             "united arab emirates", "dubai", "israel", "south africa", "nigeria", "kenya",
+             "egypt", "morocco", "portugal", "switzerland", "austria", "belgium", "ireland",
+             "russia", "ukraine", "czech", "romania", "greece", "hungary"],
+    "na": ["united states", "canada"],
+    "sea": ["philippines", "vietnam", "thailand", "malaysia", "singapore", "indonesia",
+            "myanmar", "cambodia", "laos", "brunei"],
+    "mena": ["saudi arabia", "uae", "united arab emirates", "dubai", "qatar", "bahrain",
+             "kuwait", "oman", "egypt", "morocco", "tunisia", "algeria", "libya",
+             "jordan", "lebanon", "iraq", "iran", "israel", "turkey"],
+    "europe": ["united kingdom", "germany", "france", "italy", "spain", "netherlands",
+               "sweden", "norway", "denmark", "finland", "poland", "portugal",
+               "switzerland", "austria", "belgium", "ireland", "russia", "ukraine",
+               "czech", "romania", "greece", "hungary", "serbia", "croatia", "bulgaria"],
+    "africa": ["south africa", "nigeria", "kenya", "egypt", "morocco", "ghana",
+               "tanzania", "ethiopia", "uganda", "rwanda", "senegal", "cameroon",
+               "ivory coast", "algeria", "tunisia"],
+}
+
 
 def parse_find_query(query: str) -> dict:
     """
@@ -314,6 +342,7 @@ def parse_find_query(query: str) -> dict:
     result = {
         "niche": None, "niche_terms": None, "platform": None,
         "language": None, "location": None,
+        "location_list": None, "location_region": None,
         "qt_rate": None, "tweet_rate": None,
         "longform_rate": None, "article_rate": None, "followers": None,
         "cookie3_score": None, "smart_followers": None,
@@ -349,8 +378,13 @@ def parse_find_query(query: str) -> dict:
                                      "article_rate", "followers",
                                      "cookie3_score", "smart_followers"):
                     value = value.replace("-", " ").replace("_", " ")
-                # Expand location aliases (e.g. USA -> United States)
+                # Expand location: check regions first, then aliases
                 if canonical == "location":
+                    region_countries = REGION_COUNTRIES.get(value.lower())
+                    if region_countries:
+                        result["location_list"] = region_countries
+                        result["location_region"] = value.upper()
+                        continue
                     value = LOCATION_ALIASES.get(value.lower(), value)
                 result[canonical] = value
 
@@ -397,8 +431,14 @@ def _parse_freetext(query_lower: str, result: dict) -> None:
                 result["niche"] = niche
                 break
 
-    # Detect locations
-    if not result["location"]:
+    # Detect locations (check regions first, then country aliases)
+    if not result["location"] and not result.get("location_list"):
+        for region, countries in REGION_COUNTRIES.items():
+            if region in query_lower:
+                result["location_list"] = countries
+                result["location_region"] = region.upper()
+                break
+    if not result["location"] and not result.get("location_list"):
         for key, loc in LOCATION_ALIASES.items():
             if key in query_lower:
                 result["location"] = loc
