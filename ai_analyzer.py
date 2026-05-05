@@ -58,6 +58,16 @@ NICHE_SYNONYMS = {
            "nlp", "natural language"],
     "finance": ["finance", "investing", "investment", "stock", "wealth", "portfolio",
                 "market", "economics", "financial"],
+    "neobank": ["neobank", "neobanks", "digital bank", "digital banking", "challenger bank",
+                "online bank", "online banking", "mobile bank", "mobile banking",
+                "banking app", "virtual bank", "fintech", "fin-tech", "banking-as-a-service",
+                "baas", "embedded finance", "debit card", "prepaid card", "payments",
+                "money transfer", "remittance", "remittances", "e-wallet", "ewallet",
+                "digital wallet", "savings account", "checking account", "deposits",
+                "interchange", "kyc", "open banking", "revolut", "n26", "monzo",
+                "chime", "nubank", "wise", "starling", "varo", "sofi", "current",
+                "mercury", "brex", "cash app", "venmo", "zelle", "tonik", "gcash",
+                "maya", "paymaya"],
     "beauty": ["beauty", "makeup", "skincare", "cosmetic", "cosmetics", "glam"],
     "fashion": ["fashion", "style", "outfit", "ootd", "clothing", "designer"],
     "fitness": ["fitness", "gym", "workout", "health", "muscle", "exercise", "training"],
@@ -123,10 +133,13 @@ Based on the bio AND the posts above, return JSON with:
   - "Trading & Portfolio Management | Risk Analysis | Education"
   - "Gaming | Esports, Streaming, Game Reviews | Entertainment"
   - "Tech | AI, Startups, Programming | Education, News"
+  - "Neobank | Digital Banking, Payments, Remittances | Education, Reviews"
 
-  Primary niches: DeFi, NFT, Trading, Gaming, Tech, AI, RWA, DePIN, L1, L2, Beauty, Fashion, Fitness, Travel, Food, Finance, Music, Comedy, Education, News, Lifestyle, Entertainment, Sports
+  Primary niches: DeFi, NFT, Trading, Gaming, Tech, AI, RWA, DePIN, L1, L2, Neobank, Beauty, Fashion, Fitness, Travel, Food, Finance, Music, Comedy, Education, News, Lifestyle, Entertainment, Sports
 
-  Subtopics to consider: Alpha Calls, Market Analysis, Memecoins, Stablecoins, GameFi, Solana, Ethereum, Bitcoin, Airdrops, Token Promotions, Community Building, Shilling, Education, News, Commentary, Drama/Scandals, Portfolio Management, Risk Analysis, Long-term Investing, Day Trading, Tokenized Assets, Real Estate, DePIN Networks, IoT, Rollups, ZK
+  Use "Neobank" when the KOL focuses on digital/challenger banks, fintech banking apps, mobile banking, e-wallets, or remittance/payment services (e.g. Revolut, N26, Monzo, Chime, Nubank, Wise, GCash, Maya, Tonik). Prefer "Neobank" over "Finance" or "Fintech" in those cases.
+
+  Subtopics to consider: Alpha Calls, Market Analysis, Memecoins, Stablecoins, GameFi, Solana, Ethereum, Bitcoin, Airdrops, Token Promotions, Community Building, Shilling, Education, News, Commentary, Drama/Scandals, Portfolio Management, Risk Analysis, Long-term Investing, Day Trading, Tokenized Assets, Real Estate, DePIN Networks, IoT, Rollups, ZK, Digital Banking, Mobile Banking, Payments, Remittances, E-Wallet, Debit Cards, Open Banking, Embedded Finance
 
   IMPORTANT: If you cannot determine the niche from the bio and posts, or if insufficient data is available, use "no data available" as the niche value. Do NOT use "Other", "Unknown", "Crypto", "Web3", "Blockchain", or "Altcoins" as a niche.
 
@@ -269,6 +282,13 @@ def _fallback_analysis(handle: str, bio: str, posts: list) -> dict:
         niche = "Travel"
     elif any(kw in combined for kw in ["food", "cook", "recipe", "restaurant", "eat", "chef"]):
         niche = "Food"
+    elif any(kw in combined for kw in [
+        "neobank", "digital bank", "challenger bank", "mobile banking", "banking app",
+        "fintech", "e-wallet", "ewallet", "digital wallet", "remittance",
+        "revolut", "n26", "monzo", "chime", "nubank", "wise", "starling",
+        "varo", "sofi", "mercury", "brex", "tonik", "gcash", "maya", "paymaya"
+    ]):
+        niche = "Neobank"
     elif any(kw in combined for kw in ["finance", "invest", "stock", "money", "wealth", "market"]):
         niche = "Finance"
     elif any(kw in combined for kw in ["music", "song", "artist", "album", "spotify"]):
