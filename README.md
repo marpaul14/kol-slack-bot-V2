@@ -5,7 +5,7 @@ A Slack bot that automates Key Opinion Leader (KOL) roster management. It scrape
 ## How It Works
 
 1. Your team maintains a **Google Sheet** with KOL names (hyperlinked to their social profiles), platform, and rate info.
-2. The bot **scrapes profiles** via [Apify](https://apify.com/) across X/Twitter, TikTok, YouTube, and Instagram.
+2. The bot **scrapes profiles** via [ScrapeCreators](https://scrapecreators.com/) across X/Twitter, TikTok, YouTube, and Instagram. [Apify](https://apify.com/) is used only for X/Twitter recent tweets (since ScrapeCreators' Twitter tweets endpoint returns popular, not latest).
 3. **Claude AI** analyzes each KOL's bio and 5 recent posts to determine their niche, language, and location.
 4. Results are **written back to the sheet** automatically — the bot never overwrites your manual data (rates, tags, contacts, notes).
 
@@ -84,7 +84,7 @@ The bot **only writes** to columns B, D, I, J, N, O, and P. It **never modifies*
 ```
 bot.py            Slack commands, message formatting, threading
 kol_engine.py     Core orchestration: scan, search, status
-scraper.py        Apify integration, profile data extraction
+scraper.py        ScrapeCreators (+ Apify for X tweets) profile data extraction
 ai_analyzer.py    Claude API for niche/language/location analysis
 sheets.py         Google Sheets API read/write layer
 ```
@@ -95,7 +95,8 @@ sheets.py         Google Sheets API read/write layer
 |---|---|
 | **Slack** (Bolt, Socket Mode) | Command handling, ephemeral progress updates |
 | **Google Sheets API** | Single source of truth for the KOL roster |
-| **Apify** | Web scraping across X, TikTok, YouTube, Instagram |
+| **ScrapeCreators** | Profile data on all platforms; recent posts on TikTok, YouTube, Instagram |
+| **Apify** | X/Twitter recent tweets only (chronological feed) |
 | **Anthropic Claude API** | AI analysis of bios and posts (uses Haiku for cost efficiency) |
 
 ### Key Design Decisions
@@ -103,7 +104,7 @@ sheets.py         Google Sheets API read/write layer
 - **Google Sheet as database** — no separate DB needed; the sheet is the single source of truth.
 - **Background threads** — long-running scans run in daemon threads so Slack commands respond instantly.
 - **Ephemeral progress** — scan progress is sent as private messages (only the requesting user sees them); final results are posted publicly.
-- **Graceful fallbacks** — if Apify is unavailable, handles are extracted from URLs; if Claude is unavailable, niche detection falls back to keyword matching.
+- **Graceful fallbacks** — if ScrapeCreators is unavailable, handles are extracted from URLs; if Apify is unavailable on X, profile data still loads but recent tweets are skipped; if Claude is unavailable, niche detection falls back to keyword matching.
 - **Rate limiting** — 1.5s delay between rows to respect API rate limits.
 
 ## Setup
@@ -116,7 +117,7 @@ cd kol-slack-bot-V2
 pip install -r requirements.txt
 ```
 
-**Dependencies:** `slack-bolt`, `slack-sdk`, `python-dotenv`, `google-api-python-client`, `google-auth`, `anthropic`, `apify-client`
+**Dependencies:** `slack-bolt`, `slack-sdk`, `python-dotenv`, `google-api-python-client`, `google-auth`, `anthropic`, `apify-client`, `requests`
 
 ### 2. Environment variables
 
@@ -132,6 +133,8 @@ cp .env.example .env
 | `SLACK_APP_TOKEN` | Yes | App-level token (`xapp-...`) for Socket Mode |
 | `SPREADSHEET_ID` | Yes | Google Sheet ID (from the sheet URL) |
 | `ANTHROPIC_API_KEY` | Yes | Anthropic API key (`sk-ant-...`) |
+| `SCRAPECREATORS_API_KEY` | Yes | ScrapeCreators API key (used for profile data + TikTok/YouTube/Instagram posts) |
+| `APIFY_API_KEY` | No | Apify token. Only needed for X/Twitter recent tweets. Without it, X profiles still load but `recent_posts` will be empty for X. |
 | `GOOGLE_CREDENTIALS_JSON` | Yes | Service account credentials as a JSON string |
 | `SHEET_NAME` | No | Sheet tab name (defaults to `Sheet1`) |
 | `ALLOWED_CHANNEL_IDS` | No | Comma-separated Slack channel IDs to restrict bot access. Leave empty to allow all channels. |

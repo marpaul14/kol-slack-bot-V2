@@ -2,7 +2,7 @@
 KOL Slack Bot — Main entry point
 
 Commands:
-- /scanall: Scrapes all KOLs using Apify, analyzes 5 posts each, caches results
+- /scanall: Scrapes all KOLs (ScrapeCreators + Apify for X tweets), analyzes 5 posts each, caches results
 - /scannew: Only scans rows missing Handle, Language, Location, or Niche (cost-effective!)
 - /findkol <query>: Searches the sheet directly (no scraping = cost effective!)
 - /kolstatus: Shows cache statistics
@@ -67,7 +67,7 @@ def send_private(client, channel: str, user: str, text: str):
 
 
 # ─────────────────────────────────────────────
-# /scanall — Scrape all KOLs using Apify
+# /scanall — Scrape all KOLs
 # ─────────────────────────────────────────────
 @app.command("/scanall")
 def handle_scanall(ack, say, command, client):
@@ -83,7 +83,7 @@ def handle_scanall(ack, say, command, client):
     client.chat_postMessage(
         channel=channel,
         text=f"🔍 <@{user}> started *Scan All*.\n"
-             f"• Scraping profiles via Apify\n"
+             f"• Scraping profiles via ScrapeCreators (+ Apify for X tweets)\n"
              f"• Analyzing 5 recent posts per KOL\n"
              f"• Results will be posted when complete.",
     )

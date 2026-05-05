@@ -161,7 +161,7 @@ class KOLEngine:
         """
         Scan all rows in the sheet:
         1. Extract links from Name column (column A)
-        2. Scrape profiles using Apify
+        2. Scrape profiles via ScrapeCreators (+ Apify for X tweets)
         3. Analyze with AI to determine niche
         4. Write results to sheet (ONLY columns B, D, I, J, N, O, P)
         """
@@ -189,7 +189,7 @@ class KOLEngine:
             try:
                 logger.info(f"[scan_all] Row {row_num}: {name}")
 
-                # Step 1: Scrape profile using Apify
+                # Step 1: Scrape profile
                 profile = sc.scrape_profile(url)
                 recent_posts = profile.get("recent_posts", [])
 
@@ -239,7 +239,7 @@ class KOLEngine:
                 pct = int(i / total * 100)
                 progress_callback(f"\u23f3 Scanning\u2026 {i}/{total} ({pct}%) \u2014 last: {name}")
 
-            # Rate limiting (Apify + Google Sheets)
+            # Rate limiting (scrape APIs + Google Sheets)
             time.sleep(1.5)
 
         logger.info(f"[scan_all] Complete: {stats}")
@@ -336,7 +336,7 @@ class KOLEngine:
             try:
                 logger.info(f"[scan_incomplete] Row {row_num}: {name}")
 
-                # Step 1: Scrape profile using Apify
+                # Step 1: Scrape profile
                 profile = sc.scrape_profile(url)
                 recent_posts = profile.get("recent_posts", [])
 

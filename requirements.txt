@@ -6,3 +6,4 @@ google-auth>=2.23.0
 google-auth-oauthlib>=1.1.0
 anthropic>=0.18.0
 apify-client>=1.6.0
+requests>=2.31.0

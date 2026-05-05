@@ -2,7 +2,7 @@
 ai_analyzer.py — Uses Claude Haiku (cheapest model) to analyze KOL posts.
 
 Process:
-1. Apify scrapes 5 recent posts + bio
+1. Scraper (ScrapeCreators + Apify for X tweets) collects 5 recent posts + bio
 2. Claude Haiku analyzes bio and posts to determine niche & language
 
 Cost: ~$0.25 per 1M tokens (very cheap!)
