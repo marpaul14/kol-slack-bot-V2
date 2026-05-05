@@ -1,23 +1,25 @@
 """
-scraper.py — Scrapes social media profiles using Apify.
+scraper.py — Scrapes social media profiles.
 
-Uses Apify actors to get:
-- Profile info (followers, bio, location)
-- 5 recent posts (for niche detection by AI)
+Hybrid backend:
+- ScrapeCreators API for profile data on all platforms, and recent posts on
+  TikTok, YouTube, Instagram.
+- Apify (apidojo/tweet-scraper) for X/Twitter recent tweets, since
+  ScrapeCreators' Twitter user-tweets endpoint only returns popular tweets,
+  not the latest ones.
 
-Supported platforms: X/Twitter, TikTok, YouTube, Instagram
+Returns up to 5 recent posts per profile for niche detection by AI.
+Supported platforms: X/Twitter, TikTok, YouTube, Instagram.
 """
 
 import os
-import re
 import logging
-import time
-from typing import Optional
 from urllib.parse import urlparse
+
+import requests
 
 logger = logging.getLogger(__name__)
 
-# Check if Apify is available
 try:
     from apify_client import ApifyClient
     APIFY_AVAILABLE = True
@@ -25,20 +27,17 @@ except ImportError:
     APIFY_AVAILABLE = False
     logger.warning("[Scraper] apify-client not installed. Run: pip install apify-client")
 
-# Apify configuration
+SC_API_KEY = os.environ.get("SCRAPECREATORS_API_KEY", "")
+SC_BASE_URL = "https://api.scrapecreators.com"
+SC_TIMEOUT = 30
+
 APIFY_TOKEN = os.environ.get("APIFY_API_KEY", "")
+TWITTER_ACTOR = "apidojo/tweet-scraper"
 
-# Apify Actor IDs
-TWITTER_ACTOR = "apidojo/tweet-scraper"  # Tweet Scraper V2 — tweets + embedded author profile
-TIKTOK_ACTOR = "clockworks/tiktok-scraper"
-YOUTUBE_ACTOR = "streamers/youtube-channel-scraper"
-INSTAGRAM_ACTOR = "apify/instagram-profile-scraper"
-
-MAX_POSTS = 5  # Scrape 5 recent posts for niche detection (lower = less Apify spend)
+MAX_POSTS = 5
 
 
 def detect_platform(url: str) -> str:
-    """Detect social media platform from URL."""
     host = urlparse(url).netloc.lower()
     if "twitter.com" in host or "x.com" in host:
         return "X"
@@ -53,8 +52,8 @@ def detect_platform(url: str) -> str:
 
 def scrape_profile(url: str) -> dict:
     """
-    Scrape a social media profile using Apify.
-    
+    Scrape a social media profile.
+
     Returns dict with:
       - handle: @username
       - platform: X, TikTok, YouTube, Instagram
@@ -77,26 +76,25 @@ def scrape_profile(url: str) -> dict:
 
     logger.info(f"[Scraper] Scraping {platform}: {url}")
 
-    # Check if Apify is configured
-    if not APIFY_AVAILABLE or not APIFY_TOKEN:
-        logger.warning("[Scraper] Apify not configured, using fallback")
+    if not SC_API_KEY:
+        logger.warning("[Scraper] SCRAPECREATORS_API_KEY not set, using fallback")
         result.update(_extract_handle_from_url(url, platform))
         result["link_status"] = "Limited"
         return result
 
     try:
         if platform == "X":
-            result.update(_scrape_x_apify(url))
+            result.update(_scrape_x(url))
         elif platform == "TikTok":
-            result.update(_scrape_tiktok_apify(url))
+            result.update(_scrape_tiktok(url))
         elif platform == "YouTube":
-            result.update(_scrape_youtube_apify(url))
+            result.update(_scrape_youtube(url))
         elif platform == "Instagram":
-            result.update(_scrape_instagram_apify(url))
+            result.update(_scrape_instagram(url))
         else:
             result.update(_extract_handle_from_url(url, platform))
             result["link_status"] = "Limited"
-            
+
     except Exception as e:
         logger.error(f"[Scraper] Error scraping {url}: {e}")
         result.update(_extract_handle_from_url(url, platform))
@@ -108,13 +106,23 @@ def scrape_profile(url: str) -> dict:
     return result
 
 
-def _scrape_x_apify(url: str) -> dict:
-    """Scrape X/Twitter profile + recent tweets via Apify apidojo/tweet-scraper.
+def _sc_get(path: str, params: dict) -> dict:
+    """GET against ScrapeCreators with x-api-key header."""
+    resp = requests.get(
+        f"{SC_BASE_URL}{path}",
+        params=params,
+        headers={"x-api-key": SC_API_KEY},
+        timeout=SC_TIMEOUT,
+    )
+    resp.raise_for_status()
+    return resp.json()
 
-    The actor returns tweet-level items, each containing the tweet text and
-    an embedded author object with profile data (followers, bio, location).
-    We extract profile info from the first item's author object and collect
-    up to MAX_POSTS recent tweet texts.
+
+def _scrape_x(url: str) -> dict:
+    """X/Twitter: ScrapeCreators for profile + Apify for recent tweets.
+
+    SC's /v1/twitter/user-tweets only returns popular tweets, so we keep
+    Apify's apidojo/tweet-scraper for chronological recent tweets.
     """
     result = {"recent_posts": []}
     handle = _extract_x_handle(url)
@@ -127,55 +135,27 @@ def _scrape_x_apify(url: str) -> dict:
     clean_handle = handle.lstrip("@")
 
     try:
-        client = ApifyClient(APIFY_TOKEN)
+        data = _sc_get("/v1/twitter/profile", {"handle": clean_handle})
+        result["followers"] = _format_number(
+            data.get("followers_count")
+            or data.get("normal_followers_count")
+            or 0
+        )
+        result["raw_bio"] = data.get("description") or ""
+        result["location"] = data.get("location") or ""
+        result["link_status"] = "OK"
+    except Exception as e:
+        logger.error(f"[Scraper] SC profile error for @{clean_handle}: {e}")
+        result["link_status"] = "Limited"
 
-        # apidojo/tweet-scraper input — fetch tweets by author
-        run_input = {
-            "author": clean_handle,
-            "maxItems": MAX_POSTS,
-        }
+    if APIFY_AVAILABLE and APIFY_TOKEN:
+        try:
+            client = ApifyClient(APIFY_TOKEN)
+            run_input = {"author": clean_handle, "maxItems": MAX_POSTS}
+            logger.info(f"[Scraper] Apify tweet-scraper for @{clean_handle}")
+            run = client.actor(TWITTER_ACTOR).call(run_input=run_input, timeout_secs=120)
+            items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
 
-        logger.info(f"[Scraper] Running Apify apidojo/tweet-scraper for @{clean_handle}")
-        run = client.actor(TWITTER_ACTOR).call(run_input=run_input, timeout_secs=120)
-
-        # Get results from dataset
-        items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
-
-        if items:
-            logger.debug(f"[Scraper] Raw Apify response keys: {list(items[0].keys())}")
-
-            # --- Extract profile data from the first item's author object ---
-            first = items[0]
-            author = (first.get("author")
-                      or first.get("user")
-                      or first.get("userInfo")
-                      or {})
-
-            if isinstance(author, dict):
-                followers = (author.get("followersCount")
-                             or author.get("followers_count")
-                             or author.get("followers")
-                             or author.get("followerCount")
-                             or 0)
-                result["followers"] = _format_number(followers)
-                result["raw_bio"] = (author.get("description")
-                                     or author.get("bio")
-                                     or author.get("biography")
-                                     or "")
-                result["location"] = (author.get("location") or "")
-            else:
-                # Fallback: profile fields may be at the top level
-                followers = (first.get("followersCount")
-                             or first.get("followers_count")
-                             or first.get("followers")
-                             or 0)
-                result["followers"] = _format_number(followers)
-                result["raw_bio"] = (first.get("description")
-                                     or first.get("bio")
-                                     or "")
-                result["location"] = first.get("location", "")
-
-            # --- Extract recent post texts from all tweet items ---
             for item in items:
                 text = (item.get("text")
                         or item.get("full_text")
@@ -184,149 +164,143 @@ def _scrape_x_apify(url: str) -> dict:
                         or "")
                 if text and len(text) > 10 and len(result["recent_posts"]) < MAX_POSTS:
                     result["recent_posts"].append(text)
-
-            result["link_status"] = "OK"
-            logger.info(f"[Scraper] Apify success: {result.get('followers', 'N/A')} followers, "
-                        f"{len(result['recent_posts'])} posts")
-        else:
-            logger.warning(f"[Scraper] No data returned for @{clean_handle}")
-            result["link_status"] = "Limited"
-
-    except Exception as e:
-        logger.error(f"[Scraper] Apify error for @{clean_handle}: {e}")
-        result["link_status"] = "Limited"
+        except Exception as e:
+            logger.error(f"[Scraper] Apify tweets error for @{clean_handle}: {e}")
+    else:
+        logger.warning("[Scraper] Apify not configured; skipping recent X tweets")
 
     return result
 
 
-def _scrape_tiktok_apify(url: str) -> dict:
-    """Scrape TikTok profile using Apify."""
+def _scrape_tiktok(url: str) -> dict:
+    """TikTok: ScrapeCreators profile + profile-videos."""
     result = {"recent_posts": []}
     handle = _extract_handle_from_path(url, "@")
     result["handle"] = f"@{handle}" if handle else ""
-    
+
+    if not handle:
+        result["link_status"] = "Invalid URL"
+        return result
+
     try:
-        client = ApifyClient(APIFY_TOKEN)
-        
-        run_input = {
-            "profiles": [url],
-            "resultsPerPage": MAX_POSTS,
-            "proxyConfiguration": {"useApifyProxy": True},
-        }
-        
-        run = client.actor(TIKTOK_ACTOR).call(run_input=run_input, timeout_secs=120)
-        items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
-        
-        if items:
-            for item in items:
-                if item.get("authorMeta"):
-                    result["followers"] = _format_number(item["authorMeta"].get("fans", 0))
-                    result["raw_bio"] = item["authorMeta"].get("signature", "")
-                
-                text = item.get("text", "")
-                if text and len(text) > 10 and len(result["recent_posts"]) < MAX_POSTS:
-                    result["recent_posts"].append(text)
-            
-            result["link_status"] = "OK"
-        else:
-            result["link_status"] = "Limited"
-            
+        profile = _sc_get("/v1/tiktok/profile", {"handle": handle})
+        # SC TikTok profile responses commonly nest user data under "user"/"userInfo"/"stats"
+        user = profile.get("user") or profile.get("userInfo") or profile
+        stats = profile.get("stats") or profile.get("statsV2") or user.get("stats") or {}
+
+        followers = (stats.get("followerCount")
+                     or stats.get("followers")
+                     or user.get("followerCount")
+                     or profile.get("followerCount")
+                     or 0)
+        result["followers"] = _format_number(followers)
+        result["raw_bio"] = (user.get("signature")
+                             or profile.get("signature")
+                             or user.get("bio")
+                             or "")
+        result["location"] = user.get("region") or profile.get("region") or ""
+        result["link_status"] = "OK"
     except Exception as e:
-        logger.error(f"[Scraper] TikTok Apify error: {e}")
+        logger.error(f"[Scraper] SC TikTok profile error for @{handle}: {e}")
         result["link_status"] = "Limited"
-    
+
+    try:
+        videos = _sc_get("/v2/tiktok/profile-videos", {"handle": handle})
+        items = videos.get("aweme_list") or videos.get("videos") or videos.get("items") or []
+        for item in items:
+            text = (item.get("desc")
+                    or item.get("description")
+                    or item.get("text")
+                    or "")
+            if text and len(text) > 10 and len(result["recent_posts"]) < MAX_POSTS:
+                result["recent_posts"].append(text)
+    except Exception as e:
+        logger.error(f"[Scraper] SC TikTok videos error for @{handle}: {e}")
+
     return result
 
 
-def _scrape_youtube_apify(url: str) -> dict:
-    """Scrape YouTube channel using Apify."""
+def _scrape_youtube(url: str) -> dict:
+    """YouTube: ScrapeCreators channel + channel-videos."""
     result = {"recent_posts": []}
     handle = _extract_handle_from_path(url, "@")
     result["handle"] = f"@{handle}" if handle else ""
-    
+
+    params = {"handle": handle} if handle else {"url": url}
+
     try:
-        client = ApifyClient(APIFY_TOKEN)
-        
-        run_input = {
-            "startUrls": [{"url": url}],
-            "maxResults": MAX_POSTS,
-        }
-        
-        run = client.actor(YOUTUBE_ACTOR).call(run_input=run_input, timeout_secs=120)
-        items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
-        
-        if items:
-            for item in items:
-                if item.get("subscriberCount"):
-                    result["followers"] = item["subscriberCount"]
-                if item.get("description"):
-                    result["raw_bio"] = item["description"]
-                
-                title = item.get("title", "")
-                if title and len(title) > 5 and len(result["recent_posts"]) < MAX_POSTS:
-                    result["recent_posts"].append(title)
-            
-            result["link_status"] = "OK"
-        else:
-            result["link_status"] = "Limited"
-            
+        channel = _sc_get("/v1/youtube/channel", params)
+        result["followers"] = _format_number(
+            channel.get("subscriberCount")
+            or channel.get("subscribers")
+            or 0
+        )
+        result["raw_bio"] = channel.get("description") or ""
+        result["location"] = channel.get("country") or ""
+        result["link_status"] = "OK"
     except Exception as e:
-        logger.error(f"[Scraper] YouTube Apify error: {e}")
+        logger.error(f"[Scraper] SC YouTube channel error: {e}")
         result["link_status"] = "Limited"
-    
+
+    try:
+        videos = _sc_get("/v1/youtube/channel-videos", params)
+        items = videos.get("videos") or videos.get("items") or []
+        for item in items:
+            text = item.get("title") or ""
+            desc = item.get("description") or ""
+            combined = f"{text} {desc}".strip()
+            if combined and len(combined) > 5 and len(result["recent_posts"]) < MAX_POSTS:
+                result["recent_posts"].append(combined)
+    except Exception as e:
+        logger.error(f"[Scraper] SC YouTube videos error: {e}")
+
     return result
 
 
-def _scrape_instagram_apify(url: str) -> dict:
-    """Scrape Instagram profile using Apify instagram-profile-scraper.
-
-    This actor returns profile data (bio, followers, location) and latest posts.
-    """
+def _scrape_instagram(url: str) -> dict:
+    """Instagram: ScrapeCreators profile + posts."""
     result = {"recent_posts": []}
     handle = _extract_handle_from_path(url, "")
     result["handle"] = f"@{handle}" if handle else ""
 
+    if not handle:
+        result["link_status"] = "Invalid URL"
+        return result
+
     try:
-        client = ApifyClient(APIFY_TOKEN)
-
-        # instagram-profile-scraper accepts usernames or URLs via usernames field
-        run_input = {
-            "usernames": [handle] if handle else [],
-            "resultsLimit": MAX_POSTS,
-        }
-
-        run = client.actor(INSTAGRAM_ACTOR).call(run_input=run_input, timeout_secs=120)
-        items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
-
-        if items:
-            for item in items:
-                # Profile-level fields from instagram-profile-scraper
-                if item.get("followersCount"):
-                    result["followers"] = _format_number(item["followersCount"])
-                if item.get("biography"):
-                    result["raw_bio"] = item["biography"]
-                if item.get("city") or item.get("location"):
-                    result["location"] = item.get("city") or item.get("location", "")
-
-                # Extract recent posts from latestPosts array
-                latest_posts = item.get("latestPosts", [])
-                for post in latest_posts:
-                    caption = post.get("caption", "") if isinstance(post, dict) else ""
-                    if caption and len(caption) > 10 and len(result["recent_posts"]) < MAX_POSTS:
-                        result["recent_posts"].append(caption)
-
-                # Also check top-level caption (some response formats)
-                caption = item.get("caption", "")
-                if caption and len(caption) > 10 and len(result["recent_posts"]) < MAX_POSTS:
-                    result["recent_posts"].append(caption)
-
-            result["link_status"] = "OK"
-        else:
-            result["link_status"] = "Limited"
-
+        profile = _sc_get("/v1/instagram/profile", {"handle": handle})
+        user = profile.get("user") or profile.get("data") or profile
+        followers = (user.get("follower_count")
+                     or user.get("followersCount")
+                     or user.get("followers_count")
+                     or profile.get("follower_count")
+                     or 0)
+        result["followers"] = _format_number(followers)
+        result["raw_bio"] = (user.get("biography")
+                             or user.get("bio")
+                             or profile.get("biography")
+                             or "")
+        result["location"] = (user.get("city_name")
+                              or user.get("location")
+                              or profile.get("city_name")
+                              or "")
+        result["link_status"] = "OK"
     except Exception as e:
-        logger.error(f"[Scraper] Instagram Apify error: {e}")
+        logger.error(f"[Scraper] SC Instagram profile error for @{handle}: {e}")
         result["link_status"] = "Limited"
+
+    try:
+        posts = _sc_get("/v1/instagram/posts", {"handle": handle})
+        items = posts.get("items") or posts.get("posts") or posts.get("data") or []
+        for item in items:
+            caption = item.get("caption")
+            if isinstance(caption, dict):
+                caption = caption.get("text", "")
+            caption = caption or item.get("text") or ""
+            if caption and len(caption) > 10 and len(result["recent_posts"]) < MAX_POSTS:
+                result["recent_posts"].append(caption)
+    except Exception as e:
+        logger.error(f"[Scraper] SC Instagram posts error for @{handle}: {e}")
 
     return result
 
@@ -334,7 +308,6 @@ def _scrape_instagram_apify(url: str) -> dict:
 # ─── Fallback / Helper Functions ─────────────────────────────────────────────
 
 def _extract_handle_from_url(url: str, platform: str) -> dict:
-    """Extract handle from URL as fallback when Apify fails."""
     if platform == "X":
         handle = _extract_x_handle(url)
     elif platform in ("TikTok", "YouTube"):
@@ -345,12 +318,11 @@ def _extract_handle_from_url(url: str, platform: str) -> dict:
         handle = f"@{handle}" if handle else ""
     else:
         handle = ""
-    
+
     return {"handle": handle}
 
 
 def _extract_x_handle(url: str) -> str:
-    """Extract Twitter/X handle from URL."""
     path = urlparse(url).path.strip("/").split("/")
     if path:
         handle = path[0].lstrip("@")
@@ -360,7 +332,6 @@ def _extract_x_handle(url: str) -> str:
 
 
 def _extract_handle_from_path(url: str, prefix: str) -> str:
-    """Extract handle from URL path."""
     path = urlparse(url).path.strip("/").split("/")
     for segment in path:
         if prefix and segment.startswith(prefix):
@@ -371,12 +342,11 @@ def _extract_handle_from_path(url: str, prefix: str) -> str:
 
 
 def _format_number(n) -> str:
-    """Format number with K/M suffix."""
     try:
         n = int(n)
     except (ValueError, TypeError):
         return str(n) if n else ""
-    
+
     if n >= 1_000_000:
         return f"{n/1_000_000:.1f}M"
     if n >= 1_000:
